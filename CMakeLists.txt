@@ -2,10 +2,9 @@ cmake_minimum_required(VERSION 3.14...3.22)
 
 # ---- Project ----
 
-# Note: update this to your new project's name and version
 project(
-  Greeter
-  VERSION 1.0
+  voxel-spor
+  VERSION 0.0.1
   LANGUAGES CXX
 )
 
@@ -19,7 +18,6 @@ if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
 endif()
 
 # ---- Add dependencies via CPM ----
-# see https://github.com/TheLartians/CPM.cmake for more info
 
 include(cmake/CPM.cmake)
 
@@ -38,12 +36,10 @@ CPMAddPackage(
 # Note: globbing sources is considered bad practice as CMake's generators may not detect new files
 # automatically. Keep that in mind when changing files, or explicitly mention them here.
 file(GLOB_RECURSE headers CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h")
-file(GLOB_RECURSE sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/source/*.cpp")
+file(GLOB_RECURSE sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 # ---- Create library ----
 
-# Note: for header-only libraries change all PUBLIC flags to INTERFACE and create an interface
-# target: add_library(${PROJECT_NAME} INTERFACE)
 add_library(${PROJECT_NAME} ${headers} ${sources})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 
