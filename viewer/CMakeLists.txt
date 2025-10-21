@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.14...3.22)
 
-project(spor-viewer LANGUAGES CXX)
+project(spor_viewer LANGUAGES CXX)
 
 # --- Import tools ----
 
@@ -10,7 +10,7 @@ include(../cmake/tools.cmake)
 
 include(../cmake/CPM.cmake)
 
-CPMAddPackage(NAME voxel-spor SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
+CPMAddPackage(NAME voxel_spor SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
 
 # ---- Create standalone executable ----
 
@@ -20,4 +20,4 @@ add_executable(${PROJECT_NAME} ${sources})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17 OUTPUT_NAME "spor-viewer")
 
-target_link_libraries(${PROJECT_NAME} voxel-spor::voxel-spor)
+target_link_libraries(${PROJECT_NAME} voxel_spor::voxel_spor)
