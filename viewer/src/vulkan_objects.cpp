@@ -289,15 +289,40 @@ Instance::ptr Instance::create(const std::string& app_name) {
     return std::make_shared<Instance>(PrivateToken{}, inst);
 }
 
-SurfaceDevice::~SurfaceDevice() {
-    vkDestroyDevice(device, nullptr);
-    vkDestroySurfaceKHR(*instance, surface, nullptr);
+WindowHandle::WindowHandle(SDL_Window* window) : window_(window) {}
+
+WindowHandle::~WindowHandle() {
+    if (window_) {
+        SDL_DestroyWindow(window_);
+    }
 }
 
-SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, SDL_Window* window,
+WindowHandle::WindowHandle(WindowHandle&& other) : window_(other.window_) {
+    other.window_ = nullptr;
+}
+
+WindowHandle& WindowHandle::operator=(WindowHandle&& other) {
+    std::swap(window_, other.window_);
+    if (&other != this) {
+        other.window_ = nullptr;
+    }
+
+    return *this;
+}
+
+WindowHandle::operator SDL_Window*() { return window_; }
+
+WindowHandle::operator const SDL_Window*() const { return window_; }
+
+SurfaceDevice::~SurfaceDevice() {
+    vkDestroyDevice(device, nullptr);
+    vkDestroySurfaceKHR(*instance_, surface, nullptr);
+}
+
+SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, std::shared_ptr<WindowHandle> window,
                                          const std::set<std::string>& required_extensions) {
     VkSurfaceKHR surface;
-    if (!SDL_Vulkan_CreateSurface(window, *inst, nullptr, &surface)) {
+    if (!SDL_Vulkan_CreateSurface(*window, *inst, nullptr, &surface)) {
         detail::check_sdl(-1);
     }
 
@@ -346,9 +371,8 @@ SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, SDL_Window* window,
 
     VulkanQueues queues(indices, logical_device);
 
-    return std::make_shared<SurfaceDevice>(PrivateToken{}, inst, physical_device, surface,
-                                           logical_device, indices,
-                                           queues);
+    return std::make_shared<SurfaceDevice>(PrivateToken{}, inst, window, physical_device, surface,
+                                           logical_device, indices, queues);
 }
 
 SwapChain::~SwapChain() {
@@ -445,9 +469,8 @@ SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, 
                                                &swap_chain_views[i]));
     }
 
-    return std::make_shared<SwapChain>(PrivateToken{}, swap_chain, swap_chain_images,
-                                       swap_chain_views,
-                                       format.format, extent);
+    return std::make_shared<SwapChain>(PrivateToken{}, surface_device, swap_chain, swap_chain_images,
+                                       swap_chain_views, format.format, extent);
 }
 
 GraphicsPipeline::~GraphicsPipeline() {}
@@ -603,9 +626,7 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
     shader_stages_.clear();
 
     return std::make_shared<GraphicsPipeline>(GraphicsPipeline::PrivateToken{}, surface_device_,
-                                              swap_chain_,
-                                              render_pass, layout,
-                                              pipeline);
+                                              swap_chain_, render_pass, layout, pipeline);
 }
 
 CommandPool::~CommandPool() {
@@ -665,8 +686,7 @@ SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surf
     }
 
     return std::make_shared<SwapChainFramebuffers>(PrivateToken{}, surface_device, swap_chain,
-                                                   pipeline,
-                                                   std::move(framebuffers));
+                                                   pipeline, std::move(framebuffers));
 }
 
 record_commands::record_commands(CommandBuffer::ptr command_buffer)
@@ -748,12 +768,13 @@ DefaultRenderSyncObjects::ptr DefaultRenderSyncObjects::create(vk::SurfaceDevice
     VkSemaphore image_available;
     VkSemaphore render_finished;
     VkFence in_flight;
-    detail::check_vulkan(vkCreateSemaphore(device->device, &semaphore_info, nullptr, &image_available));
+    detail::check_vulkan(
+        vkCreateSemaphore(device->device, &semaphore_info, nullptr, &image_available));
     detail::check_vulkan(
         vkCreateSemaphore(device->device, &semaphore_info, nullptr, &render_finished));
     detail::check_vulkan(vkCreateFence(device->device, &fence_info, nullptr, &in_flight));
 
-    return std::make_shared<DefaultRenderSyncObjects>(PrivateToken{}, image_available,
+    return std::make_shared<DefaultRenderSyncObjects>(PrivateToken{}, device, image_available,
                                                       render_finished, in_flight);
 }
 

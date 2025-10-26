@@ -42,13 +42,14 @@ void Scene::pre_setup(vk::Instance::ptr instance, vk::SurfaceDevice::ptr surface
 
 class AppWindowState {
 public:
-    AppWindowState(SDL_Window* window, vk::Instance::ptr instance, vk::SurfaceDevice::ptr device)
+    AppWindowState(std::shared_ptr<vk::WindowHandle> window, vk::Instance::ptr instance,
+                   vk::SurfaceDevice::ptr device)
         : instance_(instance),
           window_(window),
           device_(device),
           sync_objects_(vk::DefaultRenderSyncObjects::create(device)) {
         int pixel_w, pixel_h;
-        SDL_GetWindowSizeInPixels(window_, &pixel_w, &pixel_h);
+        SDL_GetWindowSizeInPixels(*window_, &pixel_w, &pixel_h);
         swap_chain_ = vk::SwapChain::create(device_, static_cast<uint32_t>(pixel_w),
                                             static_cast<uint32_t>(pixel_h));
     }
@@ -56,8 +57,9 @@ public:
     ~AppWindowState() {
         vkDeviceWaitIdle(device_->device);
 
-        // might need to have the other objects destroyed first? make a RAII wrapper around SDL_Window*?
-        SDL_DestroyWindow(window_);
+        // might need to have the other objects destroyed first? make a RAII wrapper around
+        // SDL_Window*?
+        // SDL_DestroyWindow(window_);
     }
 
 public:
@@ -121,21 +123,25 @@ public:
         scene_->setup();
     }
 
-    void request_close() { request_close_ = true; }
+    std::shared_ptr<vk::WindowHandle> window() { return window_; }
+
+    void request_close() { requesting_close_ = true; }
+
+    bool is_requesting_close() const { return requesting_close_; }
 
 private:
     vk::Instance::ptr instance_;
 
-    SDL_Window* window_;
+    std::shared_ptr<vk::WindowHandle> window_;
     vk::SurfaceDevice::ptr device_;
     vk::SwapChain::ptr swap_chain_;
+
+    bool requesting_close_{false};
 
     // Scene state
     vk::DefaultRenderSyncObjects::ptr sync_objects_;
 
     std::unique_ptr<Scene> scene_{nullptr};
-
-    bool request_close_{false};
 };
 
 Window::Window(AppWindowState* state) : state_(state) {}
@@ -165,8 +171,10 @@ Window VulkanApplication::create_window(std::string title, size_t w, size_t h) {
         std::string(VK_KHR_SWAPCHAIN_EXTENSION_NAME),
     };
 
-    auto surface_device = vk::SurfaceDevice::create(instance_, window, required_extensions);
-    window_states_.push_back(std::make_unique<AppWindowState>(window, instance_, surface_device));
+    auto window_handle = std::make_shared<vk::WindowHandle>(window);
+    auto surface_device = vk::SurfaceDevice::create(instance_, window_handle, required_extensions);
+    window_states_.push_back(
+        std::make_unique<AppWindowState>(window_handle, instance_, surface_device));
 
     return Window(window_states_.back().get());
 }
@@ -174,19 +182,42 @@ Window VulkanApplication::create_window(std::string title, size_t w, size_t h) {
 int VulkanApplication::run() {
     bool any_window_open = true;
     bool quit = false;
-    while (any_window_open || quit) {
+    while (any_window_open && !quit) {
+        std::set<SDL_Window*> windows_to_kill;
+
         SDL_Event event;
         while (SDL_PollEvent(&event) != 0) {
             // close the window when user clicks the X button or alt-f4s
             if (event.type == SDL_EVENT_QUIT) {
                 quit = true;
                 break;
+            } else if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+                windows_to_kill.insert(SDL_GetWindowFromID(event.window.windowID));
             }
         }
 
+        std::set<AppWindowState*> states_to_cull;
         for (auto& w_state : window_states_) {
+            if (windows_to_kill.count(*w_state->window())) {
+                states_to_cull.insert(w_state.get());
+                continue;
+            }
+
+            if (w_state->is_requesting_close()) {
+                states_to_cull.insert(w_state.get());
+                continue;
+            }
+
             w_state->draw();
         }
+
+        window_states_.erase(std::remove_if(window_states_.begin(), window_states_.end(),
+                                            [&states_to_cull](const auto& element) {
+                                                return states_to_cull.count(element.get()) > 0;
+                                            }),
+                             window_states_.end());
+
+        any_window_open = !window_states_.empty();
     }
 
     return 0;

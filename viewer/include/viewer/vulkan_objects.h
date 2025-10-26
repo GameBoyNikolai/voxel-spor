@@ -76,12 +76,30 @@ public:
     Instance(PrivateToken, VkInstance inst) : instance(inst) {}
 };
 
+class WindowHandle {
+public:
+    WindowHandle(SDL_Window* window);
+    ~WindowHandle();
+
+    WindowHandle(WindowHandle&&);
+    WindowHandle& operator=(WindowHandle&&);
+
+    WindowHandle(const WindowHandle&) = delete;
+    WindowHandle& operator=(const WindowHandle&) = delete;
+
+    operator SDL_Window*();
+    operator const SDL_Window*() const;
+
+private:
+    SDL_Window* window_;
+};
+
 class SurfaceDevice : public VulkanObject<SurfaceDevice> {
 public:
     ~SurfaceDevice();
 
 public:
-    static ptr create(Instance::ptr inst, SDL_Window* window,
+    static ptr create(Instance::ptr inst, std::shared_ptr<WindowHandle> window,
                       const std::set<std::string>& required_extensions);
 
 public:
@@ -93,10 +111,12 @@ public:
     VulkanQueues queues;
 
 public:
-    SurfaceDevice(PrivateToken, std::shared_ptr<Instance> instance, VkPhysicalDevice p_device,
+    SurfaceDevice(PrivateToken, std::shared_ptr<Instance> instance,
+                  std::shared_ptr<WindowHandle> window, VkPhysicalDevice p_device,
                   VkSurfaceKHR surface, VkDevice device, VulkanQueueIndices indices,
                   VulkanQueues queues)
-        : instance(instance),
+        : instance_(instance),
+          window_(window),
           physical_device(p_device),
           surface(surface),
           device(device),
@@ -104,7 +124,8 @@ public:
           queues(queues) {}
 
 private:
-    std::shared_ptr<Instance> instance;
+    std::shared_ptr<Instance> instance_;
+    std::shared_ptr<WindowHandle> window_;
 };
 
 class SwapChain : public VulkanObject<SwapChain> {
@@ -126,9 +147,11 @@ private:
     SurfaceDevice::ptr surface_device_;
 
 public:
-    SwapChain(PrivateToken, VkSwapchainKHR swap_chain, std::vector<VkImage> images,
-              std::vector<VkImageView> swap_chain_views, VkFormat format, VkExtent2D extent)
-        : swap_chain(swap_chain),
+    SwapChain(PrivateToken, SurfaceDevice::ptr surface_device, VkSwapchainKHR swap_chain,
+              std::vector<VkImage> images, std::vector<VkImageView> swap_chain_views,
+              VkFormat format, VkExtent2D extent)
+        : surface_device_(surface_device),
+          swap_chain(swap_chain),
           images(images),
           swap_chain_views(swap_chain_views),
           format(format),
@@ -170,14 +193,14 @@ public:
     template <size_t N>
     GraphicsPipelineBuilder& add_vertex_shader(const std::array<uint32_t, N>& shader) {
         add_shader(VK_SHADER_STAGE_VERTEX_BIT, shader.data(), shader.size());
-    
+
         return *this;
     }
 
     template <size_t N>
     GraphicsPipelineBuilder& add_fragment_shader(const std::array<uint32_t, N>& shader) {
         add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, shader.data(), shader.size());
-    
+
         return *this;
     }
 
@@ -233,7 +256,7 @@ public:
 
 public:
     static ptr create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain,
-               GraphicsPipeline::ptr pipeline);
+                      GraphicsPipeline::ptr pipeline);
 
 public:
     std::vector<VkFramebuffer> framebuffers;
@@ -244,8 +267,9 @@ private:
     GraphicsPipeline::ptr pipeline_;
 
 public:
-    SwapChainFramebuffers(PrivateToken, SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain,
-                          GraphicsPipeline::ptr pipeline, std::vector<VkFramebuffer> framebuffers)
+    SwapChainFramebuffers(PrivateToken, SurfaceDevice::ptr surface_device,
+                          SwapChain::ptr swap_chain, GraphicsPipeline::ptr pipeline,
+                          std::vector<VkFramebuffer> framebuffers)
         : surface_device_(surface_device),
           swap_chain_(swap_chain),
           pipeline_(pipeline),
@@ -297,9 +321,11 @@ private:
     vk::SurfaceDevice::ptr surface_device_;
 
 public:
-    DefaultRenderSyncObjects(PrivateToken, VkSemaphore image_available, VkSemaphore render_finished,
+    DefaultRenderSyncObjects(PrivateToken, vk::SurfaceDevice::ptr surface_device,
+                             VkSemaphore image_available, VkSemaphore render_finished,
                              VkFence in_flight)
-        : image_available(image_available),
+        : surface_device_(surface_device),
+          image_available(image_available),
           render_finished(render_finished),
           in_flight(in_flight) {}
 };
