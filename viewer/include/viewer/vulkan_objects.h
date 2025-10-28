@@ -10,8 +10,11 @@
 
 struct SDL_Window;
 
-namespace spor {
-namespace vk {
+namespace spor::vk {
+
+namespace helpers {
+void check_vulkan(VkResult result);
+}
 
 struct NonCopyable {
     NonCopyable() = default;
@@ -185,6 +188,26 @@ public:
           graphics_pipeline(graphics_pipeline) {}
 };
 
+class DescriptorSetLayout : public VulkanObject<DescriptorSetLayout> {
+public:
+    ~DescriptorSetLayout();
+
+public:
+    // TODO: expose stage flags
+    static ptr create(SurfaceDevice::ptr surface_device, uint32_t binding);
+
+public:
+    VkDescriptorSetLayout descriptor_layout;
+
+private:
+    SurfaceDevice::ptr surface_device_;
+
+public:
+    DescriptorSetLayout(PrivateToken, SurfaceDevice::ptr surface_device,
+                        VkDescriptorSetLayout descriptor_layout)
+        : surface_device_(surface_device), descriptor_layout(descriptor_layout) {}
+};
+
 class GraphicsPipelineBuilder {
 public:
     GraphicsPipelineBuilder(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain)
@@ -204,6 +227,12 @@ public:
         return *this;
     }
 
+    GraphicsPipelineBuilder& set_vertex_descriptors(
+        VkVertexInputBindingDescription binding_desc,
+        std::vector<VkVertexInputAttributeDescription> attrib_descs);
+
+    GraphicsPipelineBuilder& add_descriptor_set(DescriptorSetLayout::ptr descriptor_set);
+
     GraphicsPipeline::ptr build();
 
 private:
@@ -215,6 +244,16 @@ private:
 
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages_;
     std::vector<VkShaderModule> shaders_;
+    
+    // TODO: accept and store multiple descriptors
+    struct VertexDescriptors {
+        VkVertexInputBindingDescription binding_desc;
+        std::vector<VkVertexInputAttributeDescription> attrib_descs;
+    };
+    std::optional<VertexDescriptors> vertex_descriptors_;
+
+    // The builder takes ownership of descriptor layout sets
+    std::vector<VkDescriptorSetLayout> descriptor_sets_;
 };
 
 class CommandPool : public VulkanObject<CommandPool> {
@@ -330,5 +369,4 @@ public:
           in_flight(in_flight) {}
 };
 
-}  // namespace vk
-}  // namespace spor
+}  // namespace spor::vk

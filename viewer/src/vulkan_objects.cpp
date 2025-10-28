@@ -8,10 +8,9 @@
 #include "fmt/format.h"
 #include "vulkan/vk_enum_string_helper.h"
 
-namespace spor {
-namespace vk {
+namespace spor::vk {
 
-namespace detail {
+namespace helpers {
 
 void check_sdl(int code) {
     if (code < 0) {
@@ -49,7 +48,7 @@ VulkanQueueIndices get_device_queues(VkPhysicalDevice device, VkSurfaceKHR surfa
         }
 
         VkBool32 present_support = false;
-        detail::check_vulkan(
+        helpers::check_vulkan(
             vkGetPhysicalDeviceSurfaceSupportKHR(device, queue_index, surface, &present_support));
         if (present_support) {
             queues.present_family = queue_index;
@@ -62,10 +61,10 @@ VulkanQueueIndices get_device_queues(VkPhysicalDevice device, VkSurfaceKHR surfa
 bool device_supports_extensions(VkPhysicalDevice device,
                                 const std::set<std::string>& required_extensions) {
     uint32_t count;
-    detail::check_vulkan(vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr));
+    helpers::check_vulkan(vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr));
 
     std::vector<VkExtensionProperties> available_extensions(count);
-    detail::check_vulkan(
+    helpers::check_vulkan(
         vkEnumerateDeviceExtensionProperties(device, nullptr, &count, available_extensions.data()));
 
     auto remaining_extensions = required_extensions;
@@ -79,11 +78,11 @@ bool device_supports_extensions(VkPhysicalDevice device,
 VulkanSwapChainDetails get_swap_chain_support(VkPhysicalDevice device, VkSurfaceKHR surface) {
     VulkanSwapChainDetails details;
 
-    detail::check_vulkan(
+    helpers::check_vulkan(
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities));
 
     uint32_t format_count;
-    detail::check_vulkan(
+    helpers::check_vulkan(
         vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, nullptr));
     if (format_count > 0) {
         details.formats.resize(format_count);
@@ -258,7 +257,7 @@ VkRenderPass create_render_pass(SurfaceDevice::ptr surface_device, SwapChain::pt
     return render_pass;
 }
 
-}  // namespace detail
+}  // namespace helpers
 
 Instance::~Instance() { vkDestroyInstance(instance, nullptr); }
 
@@ -280,11 +279,11 @@ Instance::ptr Instance::create(const std::string& app_name) {
     create_info.ppEnabledExtensionNames
         = SDL_Vulkan_GetInstanceExtensions(&create_info.enabledExtensionCount);
     if (!create_info.ppEnabledExtensionNames) {
-        detail::check_sdl(-1);
+        helpers::check_sdl(-1);
     }
 
     VkInstance inst;
-    detail::check_vulkan(vkCreateInstance(&create_info, nullptr, &inst));
+    helpers::check_vulkan(vkCreateInstance(&create_info, nullptr, &inst));
 
     return std::make_shared<Instance>(PrivateToken{}, inst);
 }
@@ -323,13 +322,13 @@ SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, std::shared_ptr<Win
                                          const std::set<std::string>& required_extensions) {
     VkSurfaceKHR surface;
     if (!SDL_Vulkan_CreateSurface(*window, *inst, nullptr, &surface)) {
-        detail::check_sdl(-1);
+        helpers::check_sdl(-1);
     }
 
     VkPhysicalDevice physical_device
-        = detail::choose_physical_device(*inst, surface, required_extensions);
+        = helpers::choose_physical_device(*inst, surface, required_extensions);
 
-    VulkanQueueIndices indices = detail::get_device_queues(physical_device, surface);
+    VulkanQueueIndices indices = helpers::get_device_queues(physical_device, surface);
 
     std::vector<VkDeviceQueueCreateInfo> queue_create_infos;
 
@@ -367,7 +366,7 @@ SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, std::shared_ptr<Win
     create_info.enabledLayerCount = 0;
 
     VkDevice logical_device;
-    detail::check_vulkan(vkCreateDevice(physical_device, &create_info, nullptr, &logical_device));
+    helpers::check_vulkan(vkCreateDevice(physical_device, &create_info, nullptr, &logical_device));
 
     VulkanQueues queues(indices, logical_device);
 
@@ -384,11 +383,11 @@ SwapChain::~SwapChain() {
 
 SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, uint32_t h) {
     auto swap_chain_details
-        = detail::get_swap_chain_support(surface_device->physical_device, surface_device->surface);
+        = helpers::get_swap_chain_support(surface_device->physical_device, surface_device->surface);
 
-    auto format = detail::choose_swap_surface_format(swap_chain_details.formats);
-    auto present_mode = detail::choose_swap_present_mode(swap_chain_details.present_modes);
-    auto extent = detail::choose_swap_extent(swap_chain_details.capabilities, w, h);
+    auto format = helpers::choose_swap_surface_format(swap_chain_details.formats);
+    auto present_mode = helpers::choose_swap_present_mode(swap_chain_details.present_modes);
+    auto extent = helpers::choose_swap_extent(swap_chain_details.capabilities, w, h);
 
     uint32_t image_count = swap_chain_details.capabilities.minImageCount + 1;
     if (swap_chain_details.capabilities.maxImageCount > 0
@@ -435,15 +434,15 @@ SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, 
     chain_create_info.oldSwapchain = VK_NULL_HANDLE;
 
     VkSwapchainKHR swap_chain;
-    detail::check_vulkan(
+    helpers::check_vulkan(
         vkCreateSwapchainKHR(surface_device->device, &chain_create_info, nullptr, &swap_chain));
 
-    detail::check_vulkan(
+    helpers::check_vulkan(
         vkGetSwapchainImagesKHR(surface_device->device, swap_chain, &image_count, nullptr));
 
     std::vector<VkImage> swap_chain_images(image_count);
-    detail::check_vulkan(vkGetSwapchainImagesKHR(surface_device->device, swap_chain, &image_count,
-                                                 swap_chain_images.data()));
+    helpers::check_vulkan(vkGetSwapchainImagesKHR(surface_device->device, swap_chain, &image_count,
+                                                  swap_chain_images.data()));
 
     std::vector<VkImageView> swap_chain_views(image_count);
 
@@ -465,12 +464,38 @@ SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, 
         view_create_info.subresourceRange.baseArrayLayer = 0;
         view_create_info.subresourceRange.layerCount = 1;
 
-        detail::check_vulkan(vkCreateImageView(surface_device->device, &view_create_info, nullptr,
-                                               &swap_chain_views[i]));
+        helpers::check_vulkan(vkCreateImageView(surface_device->device, &view_create_info, nullptr,
+                                                &swap_chain_views[i]));
     }
 
-    return std::make_shared<SwapChain>(PrivateToken{}, surface_device, swap_chain, swap_chain_images,
-                                       swap_chain_views, format.format, extent);
+    return std::make_shared<SwapChain>(PrivateToken{}, surface_device, swap_chain,
+                                       swap_chain_images, swap_chain_views, format.format, extent);
+}
+
+
+DescriptorSetLayout::~DescriptorSetLayout() {
+    vkDestroyDescriptorSetLayout(surface_device_->device, descriptor_layout, nullptr);
+}
+
+DescriptorSetLayout::ptr DescriptorSetLayout::create(SurfaceDevice::ptr surface_device,
+                                                     uint32_t binding) {
+    VkDescriptorSetLayoutBinding layout{};
+    layout.binding = binding;
+    layout.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    layout.descriptorCount = 1;
+    layout.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    layout.pImmutableSamplers = nullptr;  // Optional
+
+    VkDescriptorSetLayoutCreateInfo layout_info{};
+    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_info.bindingCount = 1;
+    layout_info.pBindings = &layout;
+
+    VkDescriptorSetLayout descriptor_layout;
+    vk::helpers::check_vulkan(vkCreateDescriptorSetLayout(surface_device->device, &layout_info,
+                                                          nullptr, &descriptor_layout));
+
+    return std::make_shared<DescriptorSetLayout>(PrivateToken{}, surface_device, descriptor_layout);
 }
 
 GraphicsPipeline::~GraphicsPipeline() {}
@@ -483,7 +508,7 @@ void GraphicsPipelineBuilder::add_shader(VkShaderStageFlagBits stage, const uint
     create_info.pCode = shader_data;
 
     VkShaderModule shader_module;
-    detail::check_vulkan(
+    helpers::check_vulkan(
         vkCreateShaderModule(surface_device_->device, &create_info, nullptr, &shader_module));
     shaders_.push_back(shader_module);
 
@@ -495,13 +520,36 @@ void GraphicsPipelineBuilder::add_shader(VkShaderStageFlagBits stage, const uint
     shader_stage_info.pName = "main";
 }
 
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_descriptors(
+    VkVertexInputBindingDescription binding_desc,
+    std::vector<VkVertexInputAttributeDescription> attrib_descs) {
+    vertex_descriptors_ = VertexDescriptors{binding_desc, std::move(attrib_descs)};
+
+    return *this;
+}
+
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_descriptor_set(
+    DescriptorSetLayout::ptr descriptor_set) {
+    descriptor_sets_.push_back(descriptor_set->descriptor_layout);
+    return *this;
+}
+
 GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
     VkPipelineVertexInputStateCreateInfo vertex_input{};
     vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertex_input.vertexBindingDescriptionCount = 0;
-    vertex_input.pVertexBindingDescriptions = nullptr;  // Optional
+    vertex_input.pVertexBindingDescriptions = nullptr;
     vertex_input.vertexAttributeDescriptionCount = 0;
-    vertex_input.pVertexAttributeDescriptions = nullptr;  // Optional
+    vertex_input.pVertexAttributeDescriptions = nullptr;
+
+    if (vertex_descriptors_) {
+        vertex_input.vertexBindingDescriptionCount = 1;
+        vertex_input.pVertexBindingDescriptions = &vertex_descriptors_->binding_desc;
+
+        vertex_input.vertexAttributeDescriptionCount
+            = static_cast<uint32_t>(vertex_descriptors_->attrib_descs.size());
+        vertex_input.pVertexAttributeDescriptions = vertex_descriptors_->attrib_descs.data();
+    }
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly{};
     input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -542,7 +590,7 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     rasterizer.depthBiasEnable = VK_FALSE;
     rasterizer.depthBiasConstantFactor = 0.0f;  // Optional
@@ -582,13 +630,15 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
 
     VkPipelineLayoutCreateInfo pipeline_layout_info{};
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_layout_info.setLayoutCount = 0;             // Optional
-    pipeline_layout_info.pSetLayouts = nullptr;          // Optional
+
+    pipeline_layout_info.setLayoutCount = static_cast<uint32_t>(descriptor_sets_.size());
+    pipeline_layout_info.pSetLayouts = descriptor_sets_.data();
+
     pipeline_layout_info.pushConstantRangeCount = 0;     // Optional
     pipeline_layout_info.pPushConstantRanges = nullptr;  // Optional
 
     VkPipelineLayout layout;
-    detail::check_vulkan(
+    helpers::check_vulkan(
         vkCreatePipelineLayout(surface_device_->device, &pipeline_layout_info, nullptr, &layout));
 
     VkGraphicsPipelineCreateInfo pipeline_info{};
@@ -607,7 +657,7 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
 
     pipeline_info.layout = layout;
 
-    auto render_pass = detail::create_render_pass(surface_device_, swap_chain_);
+    auto render_pass = helpers::create_render_pass(surface_device_, swap_chain_);
     pipeline_info.renderPass = render_pass;
     pipeline_info.subpass = 0;
 
@@ -615,15 +665,20 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
     pipeline_info.basePipelineIndex = -1;               // Optional
 
     VkPipeline pipeline;
-    detail::check_vulkan(vkCreateGraphicsPipelines(surface_device_->device, VK_NULL_HANDLE, 1,
-                                                   &pipeline_info, nullptr, &pipeline));
+    helpers::check_vulkan(vkCreateGraphicsPipelines(surface_device_->device, VK_NULL_HANDLE, 1,
+                                                    &pipeline_info, nullptr, &pipeline));
 
     for (auto& shader_module : shaders_) {
         vkDestroyShaderModule(surface_device_->device, shader_module, nullptr);
     }
 
+    for (auto& descriptor_set : descriptor_sets_) {
+        vkDestroyDescriptorSetLayout(surface_device_->device, descriptor_set, nullptr);
+    }
+
     shaders_.clear();
     shader_stages_.clear();
+    descriptor_sets_.clear();
 
     return std::make_shared<GraphicsPipeline>(GraphicsPipeline::PrivateToken{}, surface_device_,
                                               swap_chain_, render_pass, layout, pipeline);
@@ -643,7 +698,7 @@ CommandPool::ptr CommandPool::create(SurfaceDevice::ptr surface_device) {
     pool_info.queueFamilyIndex = queue_indices.graphics_family.value();
 
     VkCommandPool pool;
-    detail::check_vulkan(vkCreateCommandPool(surface_device->device, &pool_info, nullptr, &pool));
+    helpers::check_vulkan(vkCreateCommandPool(surface_device->device, &pool_info, nullptr, &pool));
 
     return std::make_shared<CommandPool>(PrivateToken{}, surface_device, pool);
 }
@@ -657,12 +712,12 @@ CommandBuffer::ptr CommandBuffer::create(SurfaceDevice::ptr surface_device,
     alloc_info.commandBufferCount = 1;
 
     VkCommandBuffer buffer;
-    detail::check_vulkan(vkAllocateCommandBuffers(surface_device->device, &alloc_info, &buffer));
+    helpers::check_vulkan(vkAllocateCommandBuffers(surface_device->device, &alloc_info, &buffer));
 
     return std::make_shared<CommandBuffer>(PrivateToken{}, surface_device, buffer);
 }
 
-SwapChainFramebuffers::~SwapChainFramebuffers() {}
+SwapChainFramebuffers::~SwapChainFramebuffers() {} // TODO: destroy framebuffers
 
 SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surface_device,
                                                          SwapChain::ptr swap_chain,
@@ -681,8 +736,9 @@ SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surf
         framebuffer_info.height = swap_chain->extent.height;
         framebuffer_info.layers = 1;
 
-        detail::check_vulkan(vkCreateFramebuffer(surface_device->device, &framebuffer_info, nullptr,
-                                                 &framebuffers[i]));
+        helpers::check_vulkan(vkCreateFramebuffer(surface_device->device, &framebuffer_info,
+                                                  nullptr, &framebuffers[i]));
+
     }
 
     return std::make_shared<SwapChainFramebuffers>(PrivateToken{}, surface_device, swap_chain,
@@ -691,19 +747,19 @@ SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surf
 
 record_commands::record_commands(CommandBuffer::ptr command_buffer)
     : command_buffer_(command_buffer) {
-    detail::check_vulkan(vkResetCommandBuffer(command_buffer->command_buffer, 0));
+    helpers::check_vulkan(vkResetCommandBuffer(command_buffer->command_buffer, 0));
 
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = 0;                   // Optional
     begin_info.pInheritanceInfo = nullptr;  // Optional
 
-    detail::check_vulkan(vkBeginCommandBuffer(command_buffer->command_buffer, &begin_info));
+    helpers::check_vulkan(vkBeginCommandBuffer(command_buffer->command_buffer, &begin_info));
 }
 
 record_commands::~record_commands() {
     if (command_buffer_) {
-        detail::check_vulkan(vkEndCommandBuffer(command_buffer_->command_buffer));
+        helpers::check_vulkan(vkEndCommandBuffer(command_buffer_->command_buffer));
     }
 }
 
@@ -768,11 +824,11 @@ DefaultRenderSyncObjects::ptr DefaultRenderSyncObjects::create(vk::SurfaceDevice
     VkSemaphore image_available;
     VkSemaphore render_finished;
     VkFence in_flight;
-    detail::check_vulkan(
+    helpers::check_vulkan(
         vkCreateSemaphore(device->device, &semaphore_info, nullptr, &image_available));
-    detail::check_vulkan(
+    helpers::check_vulkan(
         vkCreateSemaphore(device->device, &semaphore_info, nullptr, &render_finished));
-    detail::check_vulkan(vkCreateFence(device->device, &fence_info, nullptr, &in_flight));
+    helpers::check_vulkan(vkCreateFence(device->device, &fence_info, nullptr, &in_flight));
 
     return std::make_shared<DefaultRenderSyncObjects>(PrivateToken{}, device, image_available,
                                                       render_finished, in_flight);
@@ -784,5 +840,4 @@ DefaultRenderSyncObjects::~DefaultRenderSyncObjects() {
     vkDestroySemaphore(surface_device_->device, image_available, nullptr);
 }
 
-}  // namespace vk
-}  // namespace spor
+}  // namespace spor::vk
