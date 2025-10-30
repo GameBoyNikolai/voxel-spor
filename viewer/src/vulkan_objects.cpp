@@ -296,15 +296,10 @@ WindowHandle::~WindowHandle() {
     }
 }
 
-WindowHandle::WindowHandle(WindowHandle&& other) : window_(other.window_) {
-    other.window_ = nullptr;
-}
+WindowHandle::WindowHandle(WindowHandle&& other) noexcept { *this = std::move(other); }
 
-WindowHandle& WindowHandle::operator=(WindowHandle&& other) {
+WindowHandle& WindowHandle::operator=(WindowHandle&& other) noexcept {
     std::swap(window_, other.window_);
-    if (&other != this) {
-        other.window_ = nullptr;
-    }
 
     return *this;
 }
@@ -472,32 +467,6 @@ SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, 
                                        swap_chain_images, swap_chain_views, format.format, extent);
 }
 
-
-DescriptorSetLayout::~DescriptorSetLayout() {
-    vkDestroyDescriptorSetLayout(surface_device_->device, descriptor_layout, nullptr);
-}
-
-DescriptorSetLayout::ptr DescriptorSetLayout::create(SurfaceDevice::ptr surface_device,
-                                                     uint32_t binding) {
-    VkDescriptorSetLayoutBinding layout{};
-    layout.binding = binding;
-    layout.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    layout.descriptorCount = 1;
-    layout.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    layout.pImmutableSamplers = nullptr;  // Optional
-
-    VkDescriptorSetLayoutCreateInfo layout_info{};
-    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_info.bindingCount = 1;
-    layout_info.pBindings = &layout;
-
-    VkDescriptorSetLayout descriptor_layout;
-    vk::helpers::check_vulkan(vkCreateDescriptorSetLayout(surface_device->device, &layout_info,
-                                                          nullptr, &descriptor_layout));
-
-    return std::make_shared<DescriptorSetLayout>(PrivateToken{}, surface_device, descriptor_layout);
-}
-
 GraphicsPipeline::~GraphicsPipeline() {}
 
 void GraphicsPipelineBuilder::add_shader(VkShaderStageFlagBits stage, const uint32_t* shader_data,
@@ -529,8 +498,8 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_descriptors(
 }
 
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_descriptor_set(
-    DescriptorSetLayout::ptr descriptor_set) {
-    descriptor_sets_.push_back(descriptor_set->descriptor_layout);
+    VkDescriptorSetLayout descriptor_set) {
+    descriptor_sets_.push_back(descriptor_set);
     return *this;
 }
 
@@ -672,10 +641,6 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
         vkDestroyShaderModule(surface_device_->device, shader_module, nullptr);
     }
 
-    for (auto& descriptor_set : descriptor_sets_) {
-        vkDestroyDescriptorSetLayout(surface_device_->device, descriptor_set, nullptr);
-    }
-
     shaders_.clear();
     shader_stages_.clear();
     descriptor_sets_.clear();
@@ -717,7 +682,7 @@ CommandBuffer::ptr CommandBuffer::create(SurfaceDevice::ptr surface_device,
     return std::make_shared<CommandBuffer>(PrivateToken{}, surface_device, buffer);
 }
 
-SwapChainFramebuffers::~SwapChainFramebuffers() {} // TODO: destroy framebuffers
+SwapChainFramebuffers::~SwapChainFramebuffers() {}  // TODO: destroy framebuffers
 
 SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surface_device,
                                                          SwapChain::ptr swap_chain,
@@ -738,7 +703,6 @@ SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surf
 
         helpers::check_vulkan(vkCreateFramebuffer(surface_device->device, &framebuffer_info,
                                                   nullptr, &framebuffers[i]));
-
     }
 
     return std::make_shared<SwapChainFramebuffers>(PrivateToken{}, surface_device, swap_chain,
@@ -763,15 +727,10 @@ record_commands::~record_commands() {
     }
 }
 
-record_commands::record_commands(record_commands&& other) : record_commands(other.command_buffer_) {
-    other.command_buffer_ = nullptr;
-}
+record_commands::record_commands(record_commands&& other) noexcept { *this = std::move(other); }
 
-record_commands& record_commands::operator=(record_commands&& other) {
+record_commands& record_commands::operator=(record_commands&& other) noexcept {
     std::swap(command_buffer_, other.command_buffer_);
-    if (&other != this) {
-        other.command_buffer_ = nullptr;
-    }
 
     return *this;
 }
@@ -800,15 +759,10 @@ render_pass::~render_pass() {
     }
 }
 
-render_pass::render_pass(render_pass&& other) : command_buffer_(other.command_buffer_) {
-    other.command_buffer_ = nullptr;
-}
+render_pass::render_pass(render_pass&& other) noexcept { *this = std::move(other); }
 
-render_pass& render_pass::operator=(render_pass&& other) {
+render_pass& render_pass::operator=(render_pass&& other) noexcept {
     std::swap(command_buffer_, other.command_buffer_);
-    if (&other != this) {
-        other.command_buffer_ = nullptr;
-    }
 
     return *this;
 }

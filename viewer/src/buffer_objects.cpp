@@ -1,5 +1,6 @@
 #include "viewer\buffer_objects.h"
 
+#include <map>
 #include <stdexcept>
 
 namespace spor::vk {
@@ -147,84 +148,124 @@ PersistentMapping::~PersistentMapping() {
     }
 }
 
-PersistentMapping::PersistentMapping(PersistentMapping&& other)
-    : buffer(other.buffer), mapped_mem(other.mapped_mem) {
-    other.buffer = nullptr;
-    other.mapped_mem = nullptr;
+PersistentMapping::PersistentMapping(PersistentMapping&& other) noexcept {
+    *this = std::move(other);
 }
 
-PersistentMapping& PersistentMapping::operator=(PersistentMapping&& other) {
+PersistentMapping& PersistentMapping::operator=(PersistentMapping&& other) noexcept {
     std::swap(buffer, other.buffer);
     std::swap(mapped_mem, other.mapped_mem);
-
-    if (this != &other) {
-        other.buffer = nullptr;
-        other.mapped_mem = nullptr;
-    }
 
     return *this;
 }
 
-DescriptorPool::~DescriptorPool() {
-    vkDestroyDescriptorPool(surface_device_->device, pool, nullptr);
+PipelineDescriptors::~PipelineDescriptors() {
+    vkDestroyDescriptorSetLayout(device_->device, layout, nullptr);
+    vkDestroyDescriptorPool(device_->device, descriptor_pool, nullptr);
 }
 
-DescriptorPool::ptr DescriptorPool::create(SurfaceDevice::ptr surface_device, size_t desc_count) {
-    VkDescriptorPoolSize pool_size{};
-    pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    pool_size.descriptorCount = static_cast<uint32_t>(desc_count);
+PipelineDescriptors::ptr PipelineDescriptors::create(
+    SurfaceDevice::ptr device, const std::vector<DescriptorInfo>& descriptors) {
+    std::map<VkDescriptorType, size_t> type_indices;
+    std::vector<VkDescriptorPoolSize> pool_sizes;
+
+    std::vector<VkDescriptorSetLayoutBinding> set_layouts;
+
+    for (const auto& desc_info : descriptors) {
+        if (type_indices.count(desc_info.type)) {
+            ++pool_sizes[type_indices[desc_info.type]].descriptorCount;
+        } else {
+            pool_sizes.push_back({desc_info.type, 1});
+            type_indices[desc_info.type] = pool_sizes.size() - 1;
+        }
+
+        auto& layout = set_layouts.emplace_back();
+        layout.binding = static_cast<uint32_t>(set_layouts.size() - 1);
+        layout.descriptorType = desc_info.type;
+        layout.descriptorCount = 1;
+        layout.stageFlags = desc_info.shader_stages;
+        layout.pImmutableSamplers = nullptr;  // Optional
+    }
 
     VkDescriptorPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_info.poolSizeCount = 1;
-    pool_info.pPoolSizes = &pool_size;
-    pool_info.maxSets = 1;
+    pool_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+    pool_info.pPoolSizes = pool_sizes.data();
+    pool_info.maxSets = static_cast<uint32_t>(descriptors.size());
 
     VkDescriptorPool pool;
-    helpers::check_vulkan(
-        vkCreateDescriptorPool(surface_device->device, &pool_info, nullptr, &pool));
+    helpers::check_vulkan(vkCreateDescriptorPool(device->device, &pool_info, nullptr, &pool));
 
-    return std::make_shared<DescriptorPool>(PrivateToken{}, surface_device, pool, desc_count);
-}
+    VkDescriptorSetLayoutCreateInfo layout_info{};
+    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_info.bindingCount = static_cast<uint32_t>(set_layouts.size());
+    layout_info.pBindings = set_layouts.data();
 
-DescriptorSet::ptr DescriptorSet::create(SurfaceDevice::ptr surface_device,
-                                         DescriptorPool::ptr pool,
-                                         DescriptorSetLayout::ptr set_layout) {
-    std::vector<VkDescriptorSetLayout> layouts(1, set_layout->descriptor_layout);
-    VkDescriptorSetAllocateInfo alloc_info{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc_info.descriptorPool = pool->pool;
-    alloc_info.descriptorSetCount = static_cast<uint32_t>(layouts.size());
-    alloc_info.pSetLayouts = layouts.data();
+    VkDescriptorSetLayout descriptor_layout;
+    vk::helpers::check_vulkan(
+        vkCreateDescriptorSetLayout(device->device, &layout_info, nullptr, &descriptor_layout));
+
+    std::vector<VkDescriptorSetLayout> layouts(1, descriptor_layout);
+    VkDescriptorSetAllocateInfo set_alloc_info{};
+    set_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    set_alloc_info.descriptorPool = pool;
+    set_alloc_info.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+    set_alloc_info.pSetLayouts = layouts.data();
 
     VkDescriptorSet descriptor_set;
     helpers::check_vulkan(
-        vkAllocateDescriptorSets(surface_device->device, &alloc_info, &descriptor_set));
+        vkAllocateDescriptorSets(device->device, &set_alloc_info, &descriptor_set));
 
-    return std::make_shared<DescriptorSet>(PrivateToken{}, surface_device, pool, set_layout, descriptor_set);
-}
+    std::vector<VkWriteDescriptorSet> set_writes;
 
-void update_descriptor_sets(SurfaceDevice::ptr device, Buffer::ptr ubo, size_t element_size,
-                            DescriptorSet::ptr descriptor_set) {
-    VkDescriptorBufferInfo buffer_info{};
-    buffer_info.buffer = ubo->buffer;
-    buffer_info.offset = 0;
-    buffer_info.range = element_size;
+    // we will store pointers to these elements, but by reserving the maximum size for each, we
+    // *won't* need to worry about reallocs moving them
+    std::vector<VkDescriptorBufferInfo> descriptor_buffer_infos;
+    descriptor_buffer_infos.reserve(descriptors.size());
 
-    VkWriteDescriptorSet descriptor_write{};
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = descriptor_set->descriptor_set;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.dstArrayElement = 0;
+    std::vector<VkDescriptorImageInfo> descriptor_image_infos;
+    descriptor_image_infos.reserve(descriptors.size());
 
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descriptor_write.descriptorCount = 1;
+    for (const auto& desc_info : descriptors) {
+        auto& descriptor_write = set_writes.emplace_back();
+        descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_write.dstSet = descriptor_set;
+        descriptor_write.dstBinding = static_cast<uint32_t>(
+            set_writes.size() - 1);  // this is counting up on vector size, but is meant to be
+                                     // synced with layout.binding above
+        descriptor_write.dstArrayElement = 0;
 
-    descriptor_write.pBufferInfo = &buffer_info;
-    descriptor_write.pImageInfo = nullptr;        // Optional
-    descriptor_write.pTexelBufferView = nullptr;  // Optional
+        descriptor_write.descriptorCount = 1;
 
-    vkUpdateDescriptorSets(device->device, 1, &descriptor_write, 0, nullptr);
+        descriptor_write.descriptorType = desc_info.type;
+
+        descriptor_write.pBufferInfo = nullptr;
+        descriptor_write.pImageInfo = nullptr;        // Optional
+        descriptor_write.pTexelBufferView = nullptr;  // Optional
+
+        switch (desc_info.type) {
+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER: {
+                auto& buffer_info = descriptor_buffer_infos.emplace_back();
+                buffer_info.buffer = desc_info.object->buffer;
+                buffer_info.offset = 0;
+                buffer_info.range = desc_info.size;
+
+                descriptor_write.pBufferInfo = &buffer_info;
+
+                break;
+            }
+            case VK_DESCRIPTOR_TYPE_SAMPLER:
+                break;
+            default:
+                break;  // remove the added write?
+        }
+    }
+
+    vkUpdateDescriptorSets(device->device, static_cast<uint32_t>(set_writes.size()),
+                           set_writes.data(), 0, nullptr);
+
+    return std::make_shared<PipelineDescriptors>(PrivateToken{}, device, pool, descriptor_set,
+                                                 descriptor_layout);
 }
 
 }  // namespace spor::vk

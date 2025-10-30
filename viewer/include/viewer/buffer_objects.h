@@ -71,8 +71,8 @@ public:
     PersistentMapping(Buffer::ptr buffer);
     ~PersistentMapping();
 
-    PersistentMapping(PersistentMapping&&);
-    PersistentMapping& operator=(PersistentMapping&&);
+    PersistentMapping(PersistentMapping&&) noexcept;
+    PersistentMapping& operator=(PersistentMapping&&) noexcept;
 
     PersistentMapping(const PersistentMapping&) = delete;
     PersistentMapping& operator=(const PersistentMapping&) = delete;
@@ -81,50 +81,39 @@ public:
     void* mapped_mem{nullptr};
 };
 
-class DescriptorPool : public VulkanObject<DescriptorPool> {
-public:
-    ~DescriptorPool();
+struct DescriptorInfo {
+    Buffer::ptr object;
+    VkDescriptorType type;
+    VkShaderStageFlags shader_stages;
 
-public:
-    static ptr create(SurfaceDevice::ptr surface_device, size_t desc_count);
-
-public:
-    VkDescriptorPool pool;
-    size_t desc_count;
-
-private:
-    SurfaceDevice::ptr surface_device_;
-
-public:
-    DescriptorPool(PrivateToken, SurfaceDevice::ptr surface_device, VkDescriptorPool pool,
-                   size_t desc_count)
-        : surface_device_(surface_device), pool(pool), desc_count(desc_count) {}
+    // only used for UBOs
+    size_t size = 0;
 };
 
-class DescriptorSet : public VulkanObject<DescriptorSet> {
+class PipelineDescriptors : public VulkanObject<PipelineDescriptors> {
 public:
-    static ptr create(SurfaceDevice::ptr surface_device, DescriptorPool::ptr pool,
-                      DescriptorSetLayout::ptr set_layout);
+    ~PipelineDescriptors();
 
 public:
+    static ptr create(SurfaceDevice::ptr device, const std::vector<DescriptorInfo>& descriptors);
+
+public:
+    VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set;
 
+    VkDescriptorSetLayout layout;
+
 private:
-    SurfaceDevice::ptr surface_device_;
-    DescriptorPool::ptr pool_;
-    DescriptorSetLayout::ptr layout_;
+    SurfaceDevice::ptr device_;
 
 public:
-    DescriptorSet(PrivateToken, SurfaceDevice::ptr surface_device, DescriptorPool::ptr pool,
-                  DescriptorSetLayout::ptr set_layout,
-                  VkDescriptorSet descriptor_set)
-        : surface_device_(surface_device),
-          pool_(pool),
-          layout_(set_layout),
-          descriptor_set(descriptor_set) {}
+    PipelineDescriptors(PrivateToken, SurfaceDevice::ptr device, VkDescriptorPool descriptor_pool,
+                        VkDescriptorSet descriptor_set,
+                        VkDescriptorSetLayout layout)
+        : device_(device),
+          descriptor_pool(descriptor_pool),
+          descriptor_set(descriptor_set),
+          layout(layout) {}
 };
-
-void update_descriptor_sets(SurfaceDevice::ptr device, Buffer::ptr ubo, size_t element_size,
-                            DescriptorSet::ptr descriptor_set);
 
 }  // namespace spor::vk

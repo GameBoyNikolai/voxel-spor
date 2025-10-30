@@ -28,9 +28,6 @@ private:
     void update_uniform_buffers();
 
 private:
-    vk::GraphicsPipeline::ptr graphics_pipeline_;
-    vk::SwapChainFramebuffers::ptr framebuffers_;
-
     vk::CommandPool::ptr cmd_pool_;
     vk::CommandBuffer::ptr cmd_buffer_;
 
@@ -39,10 +36,11 @@ private:
 
     vk::Buffer::ptr mvp_ubo_;
     std::unique_ptr<vk::PersistentMapping> mvp_mapping_;
-    vk::DescriptorSetLayout::ptr ubo_descriptor_;
 
-    vk::DescriptorPool::ptr descriptor_pool_;
-    vk::DescriptorSet::ptr descriptor_set_;
+    vk::PipelineDescriptors::ptr descriptors_;
+
+    vk::GraphicsPipeline::ptr graphics_pipeline_;
+    vk::SwapChainFramebuffers::ptr framebuffers_;
 
     float time = 0.f;
 };

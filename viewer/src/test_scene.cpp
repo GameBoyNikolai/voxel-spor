@@ -47,20 +47,14 @@ struct UniformBufferObject {
 };
 
 void TestScene::setup() {
-    mvp_ubo_ = vk::create_uniform_buffer(surface_device_, sizeof(UniformBufferObject), 1);
+    mvp_ubo_ = vk::create_uniform_buffer(surface_device_, 1, sizeof(UniformBufferObject));
     mvp_mapping_ = std::make_unique<vk::PersistentMapping>(mvp_ubo_);
-    ubo_descriptor_ = vk::DescriptorSetLayout::create(surface_device_, 0);
 
-    graphics_pipeline_ = vk::GraphicsPipelineBuilder(surface_device_, swap_chain_)      //
-                             .add_vertex_shader(spor::shaders::test::vert)              //
-                             .add_fragment_shader(spor::shaders::test::frag)            //
-                             .set_vertex_descriptors(Vertex::binding_description(),     //
-                                                     Vertex::attribute_descriptions())  //
-                             .add_descriptor_set(ubo_descriptor_)                       //
-                             .build();
-
-    framebuffers_
-        = vk::SwapChainFramebuffers::create(surface_device_, swap_chain_, graphics_pipeline_);
+    descriptors_ = vk::PipelineDescriptors::create(
+        surface_device_, {
+                             {mvp_ubo_, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                              VK_SHADER_STAGE_VERTEX_BIT, mvp_ubo_->size()},
+                         });
 
     cmd_pool_ = vk::CommandPool::create(surface_device_);
     cmd_buffer_ = vk::CommandBuffer::create(surface_device_, cmd_pool_);
@@ -89,10 +83,16 @@ void TestScene::setup() {
         vk::submit_commands(transfer_cmd, *surface_device_->queues.graphics_queue);
     }
 
-    descriptor_pool_ = vk::DescriptorPool::create(surface_device_, 1);
-    descriptor_set_ = vk::DescriptorSet::create(surface_device_, descriptor_pool_, ubo_descriptor_);
-    vk::update_descriptor_sets(surface_device_, mvp_ubo_, sizeof(UniformBufferObject),
-                               descriptor_set_);
+    graphics_pipeline_ = vk::GraphicsPipelineBuilder(surface_device_, swap_chain_)      //
+                             .add_vertex_shader(spor::shaders::test::vert)              //
+                             .add_fragment_shader(spor::shaders::test::frag)            //
+                             .set_vertex_descriptors(Vertex::binding_description(),     //
+                                                     Vertex::attribute_descriptions())  //
+                             .add_descriptor_set(descriptors_->layout)                  //
+                             .build();
+
+    framebuffers_
+        = vk::SwapChainFramebuffers::create(surface_device_, swap_chain_, graphics_pipeline_);
 }
 
 vk::CommandBuffer::ptr TestScene::render(uint32_t framebuffer_index) {
@@ -123,7 +123,7 @@ vk::CommandBuffer::ptr TestScene::render(uint32_t framebuffer_index) {
 
     vkCmdBindDescriptorSets(cmd_buffer_->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             graphics_pipeline_->pipeline_layout, 0, 1,
-                            &descriptor_set_->descriptor_set, 0, nullptr);
+                            &descriptors_->descriptor_set, 0, nullptr);
 
     VkBuffer vertex_buffers[] = {vbo_->buffer};
     VkDeviceSize offsets[] = {0};

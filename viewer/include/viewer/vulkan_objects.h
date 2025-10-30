@@ -84,8 +84,8 @@ public:
     WindowHandle(SDL_Window* window);
     ~WindowHandle();
 
-    WindowHandle(WindowHandle&&);
-    WindowHandle& operator=(WindowHandle&&);
+    WindowHandle(WindowHandle&&) noexcept;
+    WindowHandle& operator=(WindowHandle&&) noexcept;
 
     WindowHandle(const WindowHandle&) = delete;
     WindowHandle& operator=(const WindowHandle&) = delete;
@@ -188,26 +188,6 @@ public:
           graphics_pipeline(graphics_pipeline) {}
 };
 
-class DescriptorSetLayout : public VulkanObject<DescriptorSetLayout> {
-public:
-    ~DescriptorSetLayout();
-
-public:
-    // TODO: expose stage flags
-    static ptr create(SurfaceDevice::ptr surface_device, uint32_t binding);
-
-public:
-    VkDescriptorSetLayout descriptor_layout;
-
-private:
-    SurfaceDevice::ptr surface_device_;
-
-public:
-    DescriptorSetLayout(PrivateToken, SurfaceDevice::ptr surface_device,
-                        VkDescriptorSetLayout descriptor_layout)
-        : surface_device_(surface_device), descriptor_layout(descriptor_layout) {}
-};
-
 class GraphicsPipelineBuilder {
 public:
     GraphicsPipelineBuilder(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain)
@@ -231,7 +211,8 @@ public:
         VkVertexInputBindingDescription binding_desc,
         std::vector<VkVertexInputAttributeDescription> attrib_descs);
 
-    GraphicsPipelineBuilder& add_descriptor_set(DescriptorSetLayout::ptr descriptor_set);
+    GraphicsPipelineBuilder& add_descriptor_set(
+        VkDescriptorSetLayout descriptor_set);
 
     GraphicsPipeline::ptr build();
 
@@ -252,7 +233,6 @@ private:
     };
     std::optional<VertexDescriptors> vertex_descriptors_;
 
-    // The builder takes ownership of descriptor layout sets
     std::vector<VkDescriptorSetLayout> descriptor_sets_;
 };
 
@@ -322,8 +302,8 @@ public:
     ~record_commands();
 
 public:
-    record_commands(record_commands&&);
-    record_commands& operator=(record_commands&&);
+    record_commands(record_commands&&) noexcept;
+    record_commands& operator=(record_commands&&) noexcept;
 
 private:
     CommandBuffer::ptr command_buffer_;
@@ -337,8 +317,8 @@ public:
     ~render_pass();
 
 public:
-    render_pass(render_pass&&);
-    render_pass& operator=(render_pass&&);
+    render_pass(render_pass&&) noexcept;
+    render_pass& operator=(render_pass&&) noexcept;
 
 private:
     CommandBuffer::ptr command_buffer_;
