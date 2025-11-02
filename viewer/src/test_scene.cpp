@@ -7,12 +7,14 @@
 #include "glm/gtc/matrix_transform.hpp"
 #include "shaders/test.frag.inl"
 #include "shaders/test.vert.inl"
+#include "viewer/image_loader.h"
 
 namespace spor {
 
 struct Vertex {
     glm::vec3 pos;
     glm::vec3 color;
+    glm::vec2 uv;
 
     static VkVertexInputBindingDescription binding_description() {
         VkVertexInputBindingDescription desc{};
@@ -24,7 +26,7 @@ struct Vertex {
     }
 
     static std::vector<VkVertexInputAttributeDescription> attribute_descriptions() {
-        std::vector<VkVertexInputAttributeDescription> descs(2);
+        std::vector<VkVertexInputAttributeDescription> descs(3);
 
         descs[0].binding = 0;
         descs[0].location = 0;
@@ -36,6 +38,11 @@ struct Vertex {
         descs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         descs[1].offset = offsetof(Vertex, color);
 
+        descs[2].binding = 0;
+        descs[2].location = 2;
+        descs[2].format = VK_FORMAT_R32G32_SFLOAT;
+        descs[2].offset = offsetof(Vertex, uv);
+
         return descs;
     }
 };
@@ -46,23 +53,55 @@ struct UniformBufferObject {
     glm::mat4 projection;
 };
 
+vk::Texture::ptr load_texture(vk::SurfaceDevice::ptr device, vk::CommandPool::ptr pool,
+                              VkQueue queue, const std::string& path) {
+    int width, height, channels;
+    stbi_uc* image_data = stbi_load(path.data(), &width, &height, &channels, STBI_rgb_alpha);
+
+    auto transfer_buf = vk::create_and_fill_transfer_buffer(
+        device, image_data, static_cast<size_t>(width * height * STBI_rgb_alpha));
+
+    stbi_image_free(image_data);
+
+    auto texture = vk::Texture::create(device, width, height);
+    vk::submit_commands(vk::transition_texture(device, pool, texture, VK_IMAGE_LAYOUT_UNDEFINED,
+                                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL),
+                        queue);
+
+    vk::submit_commands(vk::texture_memcpy(device, pool, transfer_buf, texture), queue);
+
+    vk::submit_commands(
+        vk::transition_texture(device, pool, texture, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+        queue);
+
+    return texture;
+}
+
 void TestScene::setup() {
     mvp_ubo_ = vk::create_uniform_buffer(surface_device_, 1, sizeof(UniformBufferObject));
     mvp_mapping_ = std::make_unique<vk::PersistentMapping>(mvp_ubo_);
 
-    descriptors_ = vk::PipelineDescriptors::create(
-        surface_device_, {
-                             {mvp_ubo_, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                              VK_SHADER_STAGE_VERTEX_BIT, mvp_ubo_->size()},
-                         });
-
     cmd_pool_ = vk::CommandPool::create(surface_device_);
     cmd_buffer_ = vk::CommandBuffer::create(surface_device_, cmd_pool_);
 
-    const std::vector<Vertex> vertices = {{{-0.5f, -0.5f, 0.2f}, {1.0f, 0.0f, 0.0f}},
-                                          {{0.5f, -0.5f, 0.f}, {0.0f, 1.0f, 0.0f}},
-                                          {{0.5f, 0.5f, 0.f}, {0.0f, 0.0f, 1.0f}},
-                                          {{-0.5f, 0.5f, 0.2f}, {1.0f, 1.0f, 1.0f}}};
+    texture_ = load_texture(surface_device_, cmd_pool_, *surface_device_->queues.graphics_queue,
+                            "C:/Users/nicho/Pictures/emotes/20220324_221902.jpg");
+    sampler_ = vk::Sampler::create(surface_device_);
+
+    descriptors_ = vk::PipelineDescriptors::create(
+        surface_device_,
+        {
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT,
+             vk::DescriptorInfo::DBuffer{mvp_ubo_, mvp_ubo_->size()}},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT,
+             vk::DescriptorInfo::DSampler{texture_, sampler_}},
+        });
+
+    const std::vector<Vertex> vertices = {{{-0.5f, -0.5f, 0.2f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+                                          {{0.5f, -0.5f, 0.f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+                                          {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+                                          {{-0.5f, 0.5f, 0.2f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}};
     const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0};
 
     vbo_ = vk::create_vertex_buffer(surface_device_, vertices.size(), sizeof(Vertex));
@@ -145,7 +184,7 @@ void TestScene::update_uniform_buffers() {
     UniformBufferObject ubo{};
     ubo.model
         = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+    ubo.view = glm::lookAt(glm::vec3(1.0f, 1.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
                            glm::vec3(0.0f, 0.0f, 1.0f));
     ubo.projection = glm::perspective(
         glm::radians(45.0f),

@@ -103,15 +103,23 @@ Buffer::ptr create_uniform_buffer(SurfaceDevice::ptr surface_device, size_t elem
                           element_size);
 }
 
+Buffer::ptr create_and_fill_transfer_buffer(SurfaceDevice::ptr surface_device,
+                                            const unsigned char* data, size_t len) {
+    auto buffer = Buffer::create(surface_device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, len, 1);
+    buffer->set_memory(data, len);
+
+    return buffer;
+}
+
 CommandBuffer::ptr buffer_memcpy(SurfaceDevice::ptr device, CommandPool::ptr pool, Buffer::ptr src,
                                  Buffer::ptr dst, size_t size) {
     auto cmd_buffer = CommandBuffer::create(device, pool);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    vkBeginCommandBuffer(cmd_buffer->command_buffer, &beginInfo);
+    vkBeginCommandBuffer(cmd_buffer->command_buffer, &begin_info);
 
     VkBufferCopy copy_region{};
     copy_region.srcOffset = 0;  // Optional
@@ -234,30 +242,29 @@ PipelineDescriptors::ptr PipelineDescriptors::create(
             set_writes.size() - 1);  // this is counting up on vector size, but is meant to be
                                      // synced with layout.binding above
         descriptor_write.dstArrayElement = 0;
-
         descriptor_write.descriptorCount = 1;
-
         descriptor_write.descriptorType = desc_info.type;
 
         descriptor_write.pBufferInfo = nullptr;
         descriptor_write.pImageInfo = nullptr;        // Optional
         descriptor_write.pTexelBufferView = nullptr;  // Optional
 
-        switch (desc_info.type) {
-            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER: {
-                auto& buffer_info = descriptor_buffer_infos.emplace_back();
-                buffer_info.buffer = desc_info.object->buffer;
-                buffer_info.offset = 0;
-                buffer_info.range = desc_info.size;
+        if (auto* buffer = std::get_if<DescriptorInfo::DBuffer>(&desc_info.object)) {
+            auto& buffer_info = descriptor_buffer_infos.emplace_back();
+            buffer_info.buffer = buffer->buffer->buffer;  // :)
+            buffer_info.offset = 0;
+            buffer_info.range = buffer->size;
 
-                descriptor_write.pBufferInfo = &buffer_info;
+            descriptor_write.pBufferInfo = &buffer_info;
+        } else if (auto* texture = std::get_if<DescriptorInfo::DSampler>(&desc_info.object)) {
+            auto& image_info = descriptor_image_infos.emplace_back();
+            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            image_info.imageView = texture->texture->view;
+            image_info.sampler = texture->sampler->sampler;  // :)
 
-                break;
-            }
-            case VK_DESCRIPTOR_TYPE_SAMPLER:
-                break;
-            default:
-                break;  // remove the added write?
+            descriptor_write.pImageInfo = &image_info;
+        } else {
+            // remove the added write?
         }
     }
 
@@ -266,6 +273,191 @@ PipelineDescriptors::ptr PipelineDescriptors::create(
 
     return std::make_shared<PipelineDescriptors>(PrivateToken{}, device, pool, descriptor_set,
                                                  descriptor_layout);
+}
+
+Texture::~Texture() {
+    vkDestroyImageView(surface_device_->device, view, nullptr);
+    vkDestroyImage(surface_device_->device, image, nullptr);
+    vkFreeMemory(surface_device_->device, memory, nullptr);
+}
+
+Texture::ptr Texture::create(SurfaceDevice::ptr surface_device, size_t width, size_t height) {
+    VkImageCreateInfo image_info{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.extent.width = static_cast<uint32_t>(width);
+    image_info.extent.height = static_cast<uint32_t>(height);
+    image_info.extent.depth = 1;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+
+    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;  // supported on basically all modern hardware
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.flags = 0;  // Optional
+
+    VkImage image;
+    helpers::check_vulkan(vkCreateImage(surface_device->device, &image_info, nullptr, &image));
+
+    VkMemoryRequirements mem_requirements;
+    vkGetImageMemoryRequirements(surface_device->device, image, &mem_requirements);
+
+    VkMemoryAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_requirements.size;
+    alloc_info.memoryTypeIndex = helpers::choose_memory_type(surface_device->physical_device,
+                                                             mem_requirements.memoryTypeBits,
+                                                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VkDeviceMemory memory;
+    helpers::check_vulkan(vkAllocateMemory(surface_device->device, &alloc_info, nullptr, &memory));
+
+    helpers::check_vulkan(vkBindImageMemory(surface_device->device, image, memory, 0));
+
+    VkImageViewCreateInfo view_info{};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = image;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = image_info.format;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.baseMipLevel = 0;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount = 1;
+
+    VkImageView view;
+    helpers::check_vulkan(vkCreateImageView(surface_device->device, &view_info, nullptr, &view));
+
+    return std::make_shared<Texture>(PrivateToken{}, surface_device, image, view, memory, width,
+                                     height);
+}
+
+CommandBuffer::ptr transition_texture(SurfaceDevice::ptr device, CommandPool::ptr pool,
+                                      Texture::ptr texture, VkImageLayout from_layout,
+                                      VkImageLayout to_layout) {
+    auto cmd_buffer = CommandBuffer::create(device, pool);
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(cmd_buffer->command_buffer, &begin_info);
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = from_layout;
+    barrier.newLayout = to_layout;
+
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    barrier.image = texture->image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags src_stage;
+    VkPipelineStageFlags dst_stage;
+
+    if (from_layout == VK_IMAGE_LAYOUT_UNDEFINED
+        && to_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (from_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+               && to_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        throw std::invalid_argument("Unsupported layout transition");
+    }
+
+    vkCmdPipelineBarrier(cmd_buffer->command_buffer, src_stage, dst_stage, 0, 0, nullptr, 0,
+                         nullptr, 1, &barrier);
+
+    vkEndCommandBuffer(cmd_buffer->command_buffer);
+
+    return cmd_buffer;
+}
+
+CommandBuffer::ptr texture_memcpy(SurfaceDevice::ptr device, CommandPool::ptr pool, Buffer::ptr src,
+                                  Texture::ptr dst) {
+    auto cmd_buffer = CommandBuffer::create(device, pool);
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(cmd_buffer->command_buffer, &begin_info);
+
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {static_cast<uint32_t>(dst->width), static_cast<uint32_t>(dst->height), 1};
+
+    vkCmdCopyBufferToImage(cmd_buffer->command_buffer, src->buffer, dst->image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    vkEndCommandBuffer(cmd_buffer->command_buffer);
+
+    return cmd_buffer;
+}
+
+Sampler::~Sampler() { vkDestroySampler(surface_device_->device, sampler, nullptr); }
+
+Sampler::ptr Sampler::create(SurfaceDevice::ptr surface_device, VkFilter filter,
+                             VkSamplerAddressMode address_mode) {
+    VkSamplerCreateInfo sampler_info{};
+    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter = filter;
+    sampler_info.minFilter = filter;
+
+    sampler_info.addressModeU = address_mode;
+    sampler_info.addressModeV = address_mode;
+    sampler_info.addressModeW = address_mode;
+
+    sampler_info.anisotropyEnable = VK_TRUE;
+
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(surface_device->physical_device, &properties);
+    sampler_info.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+
+    sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_info.unnormalizedCoordinates = VK_FALSE;
+
+    sampler_info.compareEnable = VK_FALSE;
+    sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.mipLodBias = 0.0f;
+    sampler_info.minLod = 0.0f;
+    sampler_info.maxLod = 0.0f;
+
+    VkSampler sampler;
+    helpers::check_vulkan(
+        vkCreateSampler(surface_device->device, &sampler_info, nullptr, &sampler));
+
+    return std::make_shared<Sampler>(PrivateToken{}, surface_device, sampler);
 }
 
 }  // namespace spor::vk

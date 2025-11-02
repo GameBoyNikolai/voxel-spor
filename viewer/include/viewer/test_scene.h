@@ -37,6 +37,9 @@ private:
     vk::Buffer::ptr mvp_ubo_;
     std::unique_ptr<vk::PersistentMapping> mvp_mapping_;
 
+    vk::Texture::ptr texture_;
+    vk::Sampler::ptr sampler_;
+
     vk::PipelineDescriptors::ptr descriptors_;
 
     vk::GraphicsPipeline::ptr graphics_pipeline_;

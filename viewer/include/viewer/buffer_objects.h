@@ -1,5 +1,8 @@
 #pragma once
 
+#include <variant>
+#include <vector>
+
 #include "viewer/vulkan_objects.h"
 
 namespace spor::vk {
@@ -59,13 +62,14 @@ template <typename T> Buffer::ptr create_and_fill_transfer_buffer(SurfaceDevice:
     return buffer;
 }
 
+Buffer::ptr create_and_fill_transfer_buffer(SurfaceDevice::ptr surface_device,
+                                            const unsigned char* data, size_t len);
+
 CommandBuffer::ptr buffer_memcpy(SurfaceDevice::ptr device, CommandPool::ptr pool, Buffer::ptr src,
                                  Buffer::ptr dst, size_t size);
 
 void submit_commands(CommandBuffer::ptr cmd_buffer, VkQueue queue, bool block = true);
 
-// TODO: go and fix all move ctors/ops to include noexcept and proper destruction/exchange of
-// resources
 class PersistentMapping {
 public:
     PersistentMapping(Buffer::ptr buffer);
@@ -81,13 +85,71 @@ public:
     void* mapped_mem{nullptr};
 };
 
+class Texture : public VulkanObject<Texture> {
+public:
+    ~Texture();
+
+public:
+    static ptr create(SurfaceDevice::ptr surface_device, size_t width, size_t height);
+
+public:
+    VkImage image;
+    VkImageView view;
+    VkDeviceMemory memory;
+
+    size_t width, height;
+
+private:
+    SurfaceDevice::ptr surface_device_;
+
+public:
+    Texture(PrivateToken, SurfaceDevice::ptr surface_device, VkImage image, VkImageView view,
+            VkDeviceMemory memory, size_t width, size_t height)
+        : surface_device_(surface_device), image(image), view(view), memory(memory), width(width), height(height) {}
+};
+
+CommandBuffer::ptr transition_texture(SurfaceDevice::ptr device, CommandPool::ptr pool,
+                                      Texture::ptr texture, VkImageLayout from_layout,
+                                      VkImageLayout to_layout);
+
+CommandBuffer::ptr texture_memcpy(SurfaceDevice::ptr device, CommandPool::ptr pool, Buffer::ptr src,
+                                 Texture::ptr dst);
+
+class Sampler : public VulkanObject<Sampler> {
+public:
+    ~Sampler();
+
+public:
+    static ptr create(SurfaceDevice::ptr surface_device, VkFilter filter = VK_FILTER_LINEAR,
+                      VkSamplerAddressMode address_mode = VK_SAMPLER_ADDRESS_MODE_REPEAT);
+
+public:
+    VkSampler sampler;
+
+private:
+    SurfaceDevice::ptr surface_device_;
+
+public:
+    Sampler(PrivateToken, SurfaceDevice::ptr surface_device,
+                   VkSampler sampler)
+        : surface_device_(surface_device), sampler(sampler) {}
+};
+
 struct DescriptorInfo {
-    Buffer::ptr object;
     VkDescriptorType type;
     VkShaderStageFlags shader_stages;
 
-    // only used for UBOs
-    size_t size = 0;
+    struct DBuffer {
+        Buffer::ptr buffer;
+        size_t size = 0;
+    };
+
+    struct DSampler {
+        Texture::ptr texture;
+        Sampler::ptr sampler;
+    };
+
+    std::variant<DBuffer, DSampler> object;
 };
 
 class PipelineDescriptors : public VulkanObject<PipelineDescriptors> {
@@ -108,8 +170,7 @@ private:
 
 public:
     PipelineDescriptors(PrivateToken, SurfaceDevice::ptr device, VkDescriptorPool descriptor_pool,
-                        VkDescriptorSet descriptor_set,
-                        VkDescriptorSetLayout layout)
+                        VkDescriptorSet descriptor_set, VkDescriptorSetLayout layout)
         : device_(device),
           descriptor_pool(descriptor_pool),
           descriptor_set(descriptor_set),

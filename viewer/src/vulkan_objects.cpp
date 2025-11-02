@@ -115,6 +115,10 @@ size_t device_score(VkPhysicalDevice device, VkSurfaceKHR surface,
         return 0;
     }
 
+    if (!features.samplerAnisotropy) {
+        return 0;
+    }
+
     if (!get_device_queues(device, surface).valid()) {
         return 0;
     }
