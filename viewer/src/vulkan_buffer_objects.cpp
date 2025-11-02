@@ -1,4 +1,4 @@
-#include "viewer\buffer_objects.h"
+#include "viewer\vulkan_buffer_objects.h"
 
 #include <map>
 #include <stdexcept>
@@ -23,8 +23,8 @@ uint32_t choose_memory_type(VkPhysicalDevice p_device, uint32_t type_filter,
 }  // namespace helpers
 
 Buffer::~Buffer() {
-    vkDestroyBuffer(surface_device_->device, buffer, nullptr);
-    vkFreeMemory(surface_device_->device, memory, nullptr);
+    vkDestroyBuffer(*surface_device_, buffer, nullptr);
+    vkFreeMemory(*surface_device_, memory, nullptr);
 }
 
 Buffer::ptr Buffer::create(SurfaceDevice::ptr surface_device, VkBufferUsageFlags usage,
@@ -38,10 +38,10 @@ Buffer::ptr Buffer::create(SurfaceDevice::ptr surface_device, VkBufferUsageFlags
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer buffer;
-    helpers::check_vulkan(vkCreateBuffer(surface_device->device, &buffer_info, nullptr, &buffer));
+    helpers::check_vulkan(vkCreateBuffer(*surface_device, &buffer_info, nullptr, &buffer));
 
     VkMemoryRequirements mem_requirements;
-    vkGetBufferMemoryRequirements(surface_device->device, buffer, &mem_requirements);
+    vkGetBufferMemoryRequirements(*surface_device, buffer, &mem_requirements);
 
     VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -62,9 +62,9 @@ Buffer::ptr Buffer::create(SurfaceDevice::ptr surface_device, VkBufferUsageFlags
         surface_device->physical_device, mem_requirements.memoryTypeBits, props);
 
     VkDeviceMemory memory;
-    helpers::check_vulkan(vkAllocateMemory(surface_device->device, &alloc_info, nullptr, &memory));
+    helpers::check_vulkan(vkAllocateMemory(*surface_device, &alloc_info, nullptr, &memory));
 
-    helpers::check_vulkan(vkBindBufferMemory(surface_device->device, buffer, memory, 0));
+    helpers::check_vulkan(vkBindBufferMemory(*surface_device, buffer, memory, 0));
 
     return std::make_shared<Buffer>(PrivateToken{}, surface_device, buffer, memory, element_count,
                                     element_size);
@@ -76,9 +76,9 @@ void Buffer::set_memory(const unsigned char* data, size_t len) {
     }
 
     void* cpu_loc;
-    helpers::check_vulkan(vkMapMemory(surface_device_->device, memory, 0, len, 0, &cpu_loc));
+    helpers::check_vulkan(vkMapMemory(*surface_device_, memory, 0, len, 0, &cpu_loc));
     std::memcpy(cpu_loc, data, len);
-    vkUnmapMemory(surface_device_->device, memory);
+    vkUnmapMemory(*surface_device_, memory);
 }
 
 size_t Buffer::size() const { return element_count * element_size; }
@@ -146,13 +146,13 @@ void submit_commands(CommandBuffer::ptr cmd_buffer, VkQueue queue, bool block) {
 }
 
 PersistentMapping::PersistentMapping(Buffer::ptr buffer) : buffer(buffer) {
-    helpers::check_vulkan(vkMapMemory(buffer->surface_device_->device, buffer->memory, 0,
+    helpers::check_vulkan(vkMapMemory(*buffer->surface_device_, buffer->memory, 0,
                                       buffer->size(), 0, &mapped_mem));
 }
 
 PersistentMapping::~PersistentMapping() {
     if (buffer && mapped_mem) {
-        vkUnmapMemory(buffer->surface_device_->device, buffer->memory);
+        vkUnmapMemory(*buffer->surface_device_, buffer->memory);
     }
 }
 
@@ -276,9 +276,9 @@ PipelineDescriptors::ptr PipelineDescriptors::create(
 }
 
 Texture::~Texture() {
-    vkDestroyImageView(surface_device_->device, view, nullptr);
-    vkDestroyImage(surface_device_->device, image, nullptr);
-    vkFreeMemory(surface_device_->device, memory, nullptr);
+    vkDestroyImageView(*surface_device_, view, nullptr);
+    vkDestroyImage(*surface_device_, image, nullptr);
+    vkFreeMemory(*surface_device_, memory, nullptr);
 }
 
 Texture::ptr Texture::create(SurfaceDevice::ptr surface_device, size_t width, size_t height) {
@@ -302,10 +302,10 @@ Texture::ptr Texture::create(SurfaceDevice::ptr surface_device, size_t width, si
     image_info.flags = 0;  // Optional
 
     VkImage image;
-    helpers::check_vulkan(vkCreateImage(surface_device->device, &image_info, nullptr, &image));
+    helpers::check_vulkan(vkCreateImage(*surface_device, &image_info, nullptr, &image));
 
     VkMemoryRequirements mem_requirements;
-    vkGetImageMemoryRequirements(surface_device->device, image, &mem_requirements);
+    vkGetImageMemoryRequirements(*surface_device, image, &mem_requirements);
 
     VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -315,9 +315,9 @@ Texture::ptr Texture::create(SurfaceDevice::ptr surface_device, size_t width, si
                                                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkDeviceMemory memory;
-    helpers::check_vulkan(vkAllocateMemory(surface_device->device, &alloc_info, nullptr, &memory));
+    helpers::check_vulkan(vkAllocateMemory(*surface_device, &alloc_info, nullptr, &memory));
 
-    helpers::check_vulkan(vkBindImageMemory(surface_device->device, image, memory, 0));
+    helpers::check_vulkan(vkBindImageMemory(*surface_device, image, memory, 0));
 
     VkImageViewCreateInfo view_info{};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -331,7 +331,7 @@ Texture::ptr Texture::create(SurfaceDevice::ptr surface_device, size_t width, si
     view_info.subresourceRange.layerCount = 1;
 
     VkImageView view;
-    helpers::check_vulkan(vkCreateImageView(surface_device->device, &view_info, nullptr, &view));
+    helpers::check_vulkan(vkCreateImageView(*surface_device, &view_info, nullptr, &view));
 
     return std::make_shared<Texture>(PrivateToken{}, surface_device, image, view, memory, width,
                                      height);
@@ -423,7 +423,7 @@ CommandBuffer::ptr texture_memcpy(SurfaceDevice::ptr device, CommandPool::ptr po
     return cmd_buffer;
 }
 
-Sampler::~Sampler() { vkDestroySampler(surface_device_->device, sampler, nullptr); }
+Sampler::~Sampler() { vkDestroySampler(*surface_device_, sampler, nullptr); }
 
 Sampler::ptr Sampler::create(SurfaceDevice::ptr surface_device, VkFilter filter,
                              VkSamplerAddressMode address_mode) {
@@ -455,7 +455,7 @@ Sampler::ptr Sampler::create(SurfaceDevice::ptr surface_device, VkFilter filter,
 
     VkSampler sampler;
     helpers::check_vulkan(
-        vkCreateSampler(surface_device->device, &sampler_info, nullptr, &sampler));
+        vkCreateSampler(*surface_device, &sampler_info, nullptr, &sampler));
 
     return std::make_shared<Sampler>(PrivateToken{}, surface_device, sampler);
 }

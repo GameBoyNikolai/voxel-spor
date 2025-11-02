@@ -3,11 +3,13 @@
 #include <variant>
 #include <vector>
 
-#include "viewer/vulkan_objects.h"
+#include "viewer/vulkan_helpers.h"
+#include "viewer/vulkan_base_objects.h"
+#include "viewer/vulkan_render_objects.h"
 
 namespace spor::vk {
 
-class Buffer : public VulkanObject<Buffer> {
+class Buffer : public helpers::VulkanObject<Buffer> {
 public:
     ~Buffer();
 
@@ -70,7 +72,7 @@ CommandBuffer::ptr buffer_memcpy(SurfaceDevice::ptr device, CommandPool::ptr poo
 
 void submit_commands(CommandBuffer::ptr cmd_buffer, VkQueue queue, bool block = true);
 
-class PersistentMapping {
+class PersistentMapping : public helpers::NonCopyable {
 public:
     PersistentMapping(Buffer::ptr buffer);
     ~PersistentMapping();
@@ -78,14 +80,11 @@ public:
     PersistentMapping(PersistentMapping&&) noexcept;
     PersistentMapping& operator=(PersistentMapping&&) noexcept;
 
-    PersistentMapping(const PersistentMapping&) = delete;
-    PersistentMapping& operator=(const PersistentMapping&) = delete;
-
     Buffer::ptr buffer;
     void* mapped_mem{nullptr};
 };
 
-class Texture : public VulkanObject<Texture> {
+class Texture : public helpers::VulkanObject<Texture> {
 public:
     ~Texture();
 
@@ -115,7 +114,7 @@ CommandBuffer::ptr transition_texture(SurfaceDevice::ptr device, CommandPool::pt
 CommandBuffer::ptr texture_memcpy(SurfaceDevice::ptr device, CommandPool::ptr pool, Buffer::ptr src,
                                  Texture::ptr dst);
 
-class Sampler : public VulkanObject<Sampler> {
+class Sampler : public helpers::VulkanObject<Sampler> {
 public:
     ~Sampler();
 
@@ -152,7 +151,7 @@ struct DescriptorInfo {
     std::variant<DBuffer, DSampler> object;
 };
 
-class PipelineDescriptors : public VulkanObject<PipelineDescriptors> {
+class PipelineDescriptors : public helpers::VulkanObject<PipelineDescriptors> {
 public:
     ~PipelineDescriptors();
 

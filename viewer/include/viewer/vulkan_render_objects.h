@@ -6,167 +6,21 @@
 #include <string>
 #include <vector>
 
+#include "viewer/vulkan_helpers.h"
 #include "vulkan/vulkan.h"
 
-struct SDL_Window;
+#include "viewer/vulkan_base_objects.h"
 
 namespace spor::vk {
 
-namespace helpers {
-void check_vulkan(VkResult result);
-}
-
-struct NonCopyable {
-    NonCopyable() = default;
-    ~NonCopyable() = default;
-
-    NonCopyable(const NonCopyable&) = delete;
-    NonCopyable& operator=(const NonCopyable&) = delete;
-
-    NonCopyable(NonCopyable&&) = default;
-    NonCopyable& operator=(NonCopyable&&) = default;
-};
-
-struct VulkanQueueIndices {
-    std::optional<uint32_t> graphics_family;
-    std::optional<uint32_t> present_family;
-
-    bool valid() { return graphics_family.has_value() && present_family.has_value(); }
-
-    size_t count() { return (graphics_family ? 1 : 0) + (present_family ? 1 : 0); }
-};
-
-struct VulkanQueues {
-    std::optional<VkQueue> graphics_queue;
-    std::optional<VkQueue> present_queue;
-
-    VulkanQueues() = default;
-    VulkanQueues(const VulkanQueueIndices& indices, VkDevice device) {
-        if (indices.graphics_family) {
-            graphics_queue.emplace();
-            vkGetDeviceQueue(device, *indices.graphics_family, 0, &graphics_queue.value());
-        }
-
-        if (indices.present_family) {
-            present_queue.emplace();
-            vkGetDeviceQueue(device, *indices.present_family, 0, &present_queue.value());
-        }
-    }
-};
-
-template <typename T> struct VulkanObject : public NonCopyable,
-                                            public std::enable_shared_from_this<T> {
-public:
-    using ptr = std::shared_ptr<T>;
-
-protected:
-    struct PrivateToken {};
-};
-
-class Instance : public VulkanObject<Instance> {
-public:
-    ~Instance();
-
-public:
-    operator VkInstance() const { return instance; }
-
-    static ptr create(const std::string& app_name);
-
-public:
-    VkInstance instance;
-
-public:
-    Instance(PrivateToken, VkInstance inst) : instance(inst) {}
-};
-
-class WindowHandle {
-public:
-    WindowHandle(SDL_Window* window);
-    ~WindowHandle();
-
-    WindowHandle(WindowHandle&&) noexcept;
-    WindowHandle& operator=(WindowHandle&&) noexcept;
-
-    WindowHandle(const WindowHandle&) = delete;
-    WindowHandle& operator=(const WindowHandle&) = delete;
-
-    operator SDL_Window*();
-    operator const SDL_Window*() const;
-
-private:
-    SDL_Window* window_;
-};
-
-class SurfaceDevice : public VulkanObject<SurfaceDevice> {
-public:
-    ~SurfaceDevice();
-
-public:
-    static ptr create(Instance::ptr inst, std::shared_ptr<WindowHandle> window,
-                      const std::set<std::string>& required_extensions);
-
-public:
-    VkPhysicalDevice physical_device;
-    VkSurfaceKHR surface;
-    VkDevice device;
-
-    VulkanQueueIndices indices;
-    VulkanQueues queues;
-
-public:
-    SurfaceDevice(PrivateToken, std::shared_ptr<Instance> instance,
-                  std::shared_ptr<WindowHandle> window, VkPhysicalDevice p_device,
-                  VkSurfaceKHR surface, VkDevice device, VulkanQueueIndices indices,
-                  VulkanQueues queues)
-        : instance_(instance),
-          window_(window),
-          physical_device(p_device),
-          surface(surface),
-          device(device),
-          indices(indices),
-          queues(queues) {}
-
-private:
-    std::shared_ptr<Instance> instance_;
-    std::shared_ptr<WindowHandle> window_;
-};
-
-class SwapChain : public VulkanObject<SwapChain> {
-public:
-    ~SwapChain();
-
-public:
-    static ptr create(SurfaceDevice::ptr surface_device, uint32_t w, uint32_t h);
-
-public:
-    VkSwapchainKHR swap_chain;
-    std::vector<VkImage> images;
-    std::vector<VkImageView> swap_chain_views;
-
-    VkFormat format;
-    VkExtent2D extent;
-
-private:
-    SurfaceDevice::ptr surface_device_;
-
-public:
-    SwapChain(PrivateToken, SurfaceDevice::ptr surface_device, VkSwapchainKHR swap_chain,
-              std::vector<VkImage> images, std::vector<VkImageView> swap_chain_views,
-              VkFormat format, VkExtent2D extent)
-        : surface_device_(surface_device),
-          swap_chain(swap_chain),
-          images(images),
-          swap_chain_views(swap_chain_views),
-          format(format),
-          extent(extent) {}
-};
-
-class GraphicsPipeline : public VulkanObject<GraphicsPipeline> {
+class GraphicsPipeline : public helpers::VulkanObject<GraphicsPipeline> {
 public:
     ~GraphicsPipeline();
 
 public:
     friend class GraphicsPipelineBuilder;
+
+    operator VkPipeline() const { return graphics_pipeline; };
 
 public:
     VkRenderPass render_pass;
@@ -211,8 +65,7 @@ public:
         VkVertexInputBindingDescription binding_desc,
         std::vector<VkVertexInputAttributeDescription> attrib_descs);
 
-    GraphicsPipelineBuilder& add_descriptor_set(
-        VkDescriptorSetLayout descriptor_set);
+    GraphicsPipelineBuilder& add_descriptor_set(VkDescriptorSetLayout descriptor_set);
 
     GraphicsPipeline::ptr build();
 
@@ -225,7 +78,7 @@ private:
 
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages_;
     std::vector<VkShaderModule> shaders_;
-    
+
     // TODO: accept and store multiple descriptors
     struct VertexDescriptors {
         VkVertexInputBindingDescription binding_desc;
@@ -236,11 +89,13 @@ private:
     std::vector<VkDescriptorSetLayout> descriptor_sets_;
 };
 
-class CommandPool : public VulkanObject<CommandPool> {
+class CommandPool : public helpers::VulkanObject<CommandPool> {
 public:
     ~CommandPool();
 
 public:
+    operator VkCommandPool() const { return command_pool; }
+
     static ptr create(SurfaceDevice::ptr surface_device);
 
 public:
@@ -254,12 +109,14 @@ public:
         : surface_device_(surface_device), command_pool(pool) {}
 };
 
-class CommandBuffer : public VulkanObject<CommandBuffer> {
+class CommandBuffer : public helpers::VulkanObject<CommandBuffer> {
 public:
-    VkCommandBuffer command_buffer;
+    operator VkCommandBuffer() const { return command_buffer; }
+
+    static ptr create(SurfaceDevice::ptr surface_device, CommandPool::ptr command_pool);
 
 public:
-    static ptr create(SurfaceDevice::ptr surface_device, CommandPool::ptr command_pool);
+    VkCommandBuffer command_buffer;
 
 private:
     SurfaceDevice::ptr surface_device_;
@@ -269,7 +126,7 @@ public:
         : surface_device_(surface_device), command_buffer(buffer) {}
 };
 
-class SwapChainFramebuffers : public VulkanObject<SwapChainFramebuffers> {
+class SwapChainFramebuffers : public helpers::VulkanObject<SwapChainFramebuffers> {
 public:
     ~SwapChainFramebuffers();
 
@@ -295,7 +152,7 @@ public:
           framebuffers(std::move(framebuffers)) {}
 };
 
-class record_commands : NonCopyable {
+class record_commands : helpers::NonCopyable {
 public:
     explicit record_commands(CommandBuffer::ptr command_buffer);
 
@@ -309,7 +166,7 @@ private:
     CommandBuffer::ptr command_buffer_;
 };
 
-class render_pass : NonCopyable {
+class render_pass : helpers::NonCopyable {
 public:
     explicit render_pass(CommandBuffer::ptr command_buffer, GraphicsPipeline::ptr pipeline,
                          VkFramebuffer framebuffer, VkRect2D area);
@@ -324,7 +181,7 @@ private:
     CommandBuffer::ptr command_buffer_;
 };
 
-struct DefaultRenderSyncObjects : public VulkanObject<DefaultRenderSyncObjects> {
+struct DefaultRenderSyncObjects : public helpers::VulkanObject<DefaultRenderSyncObjects> {
 public:
     ~DefaultRenderSyncObjects();
 

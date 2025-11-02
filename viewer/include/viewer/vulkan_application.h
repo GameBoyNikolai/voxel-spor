@@ -3,7 +3,8 @@
 #include <memory>
 #include <string>
 
-#include "vulkan_objects.h"
+#include "viewer/vulkan_base_objects.h"
+#include "viewer/vulkan_render_objects.h"
 
 namespace spor {
 

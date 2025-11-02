@@ -13,8 +13,9 @@
 #include "fmt/format.h"
 #include "shaders/test.frag.inl"
 #include "shaders/test.vert.inl"
-#include "vulkan/vk_enum_string_helper.h"
 #include "vulkan/vulkan.h"
+
+#include "viewer/vulkan_render_objects.h"
 
 namespace spor {
 
@@ -23,13 +24,6 @@ void check_sdl(int code) {
         const char* err = SDL_GetError();
         std::cerr << fmt::format("SDL Error: {}", err) << std::endl;
         throw std::runtime_error(fmt::format("SDL Error: %s", err));
-    }
-}
-
-void check_vulkan(VkResult result) {
-    if (result != VK_SUCCESS) {
-        std::cerr << fmt::format("Vulkan Error: {}", string_VkResult(result)) << std::endl;
-        throw std::runtime_error(fmt::format("Vulkan Error: %s", string_VkResult(result)));
     }
 }
 
@@ -56,10 +50,6 @@ public:
 
     ~AppWindowState() {
         vkDeviceWaitIdle(device_->device);
-
-        // might need to have the other objects destroyed first? make a RAII wrapper around
-        // SDL_Window*?
-        // SDL_DestroyWindow(window_);
     }
 
 public:
@@ -93,7 +83,7 @@ public:
         submit_info.signalSemaphoreCount = 1;
         submit_info.pSignalSemaphores = signal_semaphores;
 
-        check_vulkan(vkQueueSubmit(*device_->queues.graphics_queue, 1, &submit_info,
+        vk::helpers::check_vulkan(vkQueueSubmit(*device_->queues.graphics_queue, 1, &submit_info,
                                    sync_objects_->in_flight));
 
         VkPresentInfoKHR present_info{};
