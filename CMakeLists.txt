@@ -81,6 +81,7 @@ find_package(Vulkan COMPONENTS glslangValidator REQUIRED)
 add_subdirectory(voxel)
 add_subdirectory(res)
 add_subdirectory(viewer)
+add_subdirectory(test)
 
 #
 # Target Folders
