@@ -5,23 +5,6 @@
 
 namespace spor::vk {
 
-namespace helpers {
-uint32_t choose_memory_type(VkPhysicalDevice p_device, uint32_t type_filter,
-                            VkMemoryPropertyFlags properties) {
-    VkPhysicalDeviceMemoryProperties mem_properties;
-    vkGetPhysicalDeviceMemoryProperties(p_device, &mem_properties);
-
-    for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
-        if ((type_filter & (1 << i))
-            && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
-        }
-    }
-
-    throw std::runtime_error("Unable to find a suitable buffer memory type");
-}
-}  // namespace helpers
-
 Buffer::~Buffer() {
     vkDestroyBuffer(*surface_device_, buffer, nullptr);
     vkFreeMemory(*surface_device_, memory, nullptr);
@@ -146,8 +129,8 @@ void submit_commands(CommandBuffer::ptr cmd_buffer, VkQueue queue, bool block) {
 }
 
 PersistentMapping::PersistentMapping(Buffer::ptr buffer) : buffer(buffer) {
-    helpers::check_vulkan(vkMapMemory(*buffer->surface_device_, buffer->memory, 0,
-                                      buffer->size(), 0, &mapped_mem));
+    helpers::check_vulkan(
+        vkMapMemory(*buffer->surface_device_, buffer->memory, 0, buffer->size(), 0, &mapped_mem));
 }
 
 PersistentMapping::~PersistentMapping() {
@@ -167,114 +150,6 @@ PersistentMapping& PersistentMapping::operator=(PersistentMapping&& other) noexc
     return *this;
 }
 
-PipelineDescriptors::~PipelineDescriptors() {
-    vkDestroyDescriptorSetLayout(device_->device, layout, nullptr);
-    vkDestroyDescriptorPool(device_->device, descriptor_pool, nullptr);
-}
-
-PipelineDescriptors::ptr PipelineDescriptors::create(
-    SurfaceDevice::ptr device, const std::vector<DescriptorInfo>& descriptors) {
-    std::map<VkDescriptorType, size_t> type_indices;
-    std::vector<VkDescriptorPoolSize> pool_sizes;
-
-    std::vector<VkDescriptorSetLayoutBinding> set_layouts;
-
-    for (const auto& desc_info : descriptors) {
-        if (type_indices.count(desc_info.type)) {
-            ++pool_sizes[type_indices[desc_info.type]].descriptorCount;
-        } else {
-            pool_sizes.push_back({desc_info.type, 1});
-            type_indices[desc_info.type] = pool_sizes.size() - 1;
-        }
-
-        auto& layout = set_layouts.emplace_back();
-        layout.binding = static_cast<uint32_t>(set_layouts.size() - 1);
-        layout.descriptorType = desc_info.type;
-        layout.descriptorCount = 1;
-        layout.stageFlags = desc_info.shader_stages;
-        layout.pImmutableSamplers = nullptr;  // Optional
-    }
-
-    VkDescriptorPoolCreateInfo pool_info{};
-    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
-    pool_info.pPoolSizes = pool_sizes.data();
-    pool_info.maxSets = static_cast<uint32_t>(descriptors.size());
-
-    VkDescriptorPool pool;
-    helpers::check_vulkan(vkCreateDescriptorPool(device->device, &pool_info, nullptr, &pool));
-
-    VkDescriptorSetLayoutCreateInfo layout_info{};
-    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_info.bindingCount = static_cast<uint32_t>(set_layouts.size());
-    layout_info.pBindings = set_layouts.data();
-
-    VkDescriptorSetLayout descriptor_layout;
-    vk::helpers::check_vulkan(
-        vkCreateDescriptorSetLayout(device->device, &layout_info, nullptr, &descriptor_layout));
-
-    std::vector<VkDescriptorSetLayout> layouts(1, descriptor_layout);
-    VkDescriptorSetAllocateInfo set_alloc_info{};
-    set_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    set_alloc_info.descriptorPool = pool;
-    set_alloc_info.descriptorSetCount = static_cast<uint32_t>(layouts.size());
-    set_alloc_info.pSetLayouts = layouts.data();
-
-    VkDescriptorSet descriptor_set;
-    helpers::check_vulkan(
-        vkAllocateDescriptorSets(device->device, &set_alloc_info, &descriptor_set));
-
-    std::vector<VkWriteDescriptorSet> set_writes;
-
-    // we will store pointers to these elements, but by reserving the maximum size for each, we
-    // *won't* need to worry about reallocs moving them
-    std::vector<VkDescriptorBufferInfo> descriptor_buffer_infos;
-    descriptor_buffer_infos.reserve(descriptors.size());
-
-    std::vector<VkDescriptorImageInfo> descriptor_image_infos;
-    descriptor_image_infos.reserve(descriptors.size());
-
-    for (const auto& desc_info : descriptors) {
-        auto& descriptor_write = set_writes.emplace_back();
-        descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_write.dstSet = descriptor_set;
-        descriptor_write.dstBinding = static_cast<uint32_t>(
-            set_writes.size() - 1);  // this is counting up on vector size, but is meant to be
-                                     // synced with layout.binding above
-        descriptor_write.dstArrayElement = 0;
-        descriptor_write.descriptorCount = 1;
-        descriptor_write.descriptorType = desc_info.type;
-
-        descriptor_write.pBufferInfo = nullptr;
-        descriptor_write.pImageInfo = nullptr;        // Optional
-        descriptor_write.pTexelBufferView = nullptr;  // Optional
-
-        if (auto* buffer = std::get_if<DescriptorInfo::DBuffer>(&desc_info.object)) {
-            auto& buffer_info = descriptor_buffer_infos.emplace_back();
-            buffer_info.buffer = buffer->buffer->buffer;  // :)
-            buffer_info.offset = 0;
-            buffer_info.range = buffer->size;
-
-            descriptor_write.pBufferInfo = &buffer_info;
-        } else if (auto* texture = std::get_if<DescriptorInfo::DSampler>(&desc_info.object)) {
-            auto& image_info = descriptor_image_infos.emplace_back();
-            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            image_info.imageView = texture->texture->view;
-            image_info.sampler = texture->sampler->sampler;  // :)
-
-            descriptor_write.pImageInfo = &image_info;
-        } else {
-            // remove the added write?
-        }
-    }
-
-    vkUpdateDescriptorSets(device->device, static_cast<uint32_t>(set_writes.size()),
-                           set_writes.data(), 0, nullptr);
-
-    return std::make_shared<PipelineDescriptors>(PrivateToken{}, device, pool, descriptor_set,
-                                                 descriptor_layout);
-}
-
 Texture::~Texture() {
     vkDestroyImageView(*surface_device_, view, nullptr);
     vkDestroyImage(*surface_device_, image, nullptr);
@@ -282,56 +157,15 @@ Texture::~Texture() {
 }
 
 Texture::ptr Texture::create(SurfaceDevice::ptr surface_device, size_t width, size_t height) {
-    VkImageCreateInfo image_info{};
-    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    image_info.imageType = VK_IMAGE_TYPE_2D;
-    image_info.extent.width = static_cast<uint32_t>(width);
-    image_info.extent.height = static_cast<uint32_t>(height);
-    image_info.extent.depth = 1;
-    image_info.mipLevels = 1;
-    image_info.arrayLayers = 1;
+    VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;  // supported on basically all modern hardware
 
-    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;  // supported on basically all modern hardware
-    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    auto [image, memory] = helpers::create_image(
+        surface_device->device, surface_device->physical_device, width, height, format,
+        VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
-    image_info.flags = 0;  // Optional
-
-    VkImage image;
-    helpers::check_vulkan(vkCreateImage(*surface_device, &image_info, nullptr, &image));
-
-    VkMemoryRequirements mem_requirements;
-    vkGetImageMemoryRequirements(*surface_device, image, &mem_requirements);
-
-    VkMemoryAllocateInfo alloc_info{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.allocationSize = mem_requirements.size;
-    alloc_info.memoryTypeIndex = helpers::choose_memory_type(surface_device->physical_device,
-                                                             mem_requirements.memoryTypeBits,
-                                                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    VkDeviceMemory memory;
-    helpers::check_vulkan(vkAllocateMemory(*surface_device, &alloc_info, nullptr, &memory));
-
-    helpers::check_vulkan(vkBindImageMemory(*surface_device, image, memory, 0));
-
-    VkImageViewCreateInfo view_info{};
-    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view_info.image = image;
-    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    view_info.format = image_info.format;
-    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    view_info.subresourceRange.baseMipLevel = 0;
-    view_info.subresourceRange.levelCount = 1;
-    view_info.subresourceRange.baseArrayLayer = 0;
-    view_info.subresourceRange.layerCount = 1;
-
-    VkImageView view;
-    helpers::check_vulkan(vkCreateImageView(*surface_device, &view_info, nullptr, &view));
+    auto view
+        = helpers::create_image_view(*surface_device, image, format, VK_IMAGE_ASPECT_COLOR_BIT);
 
     return std::make_shared<Texture>(PrivateToken{}, surface_device, image, view, memory, width,
                                      height);
@@ -454,10 +288,117 @@ Sampler::ptr Sampler::create(SurfaceDevice::ptr surface_device, VkFilter filter,
     sampler_info.maxLod = 0.0f;
 
     VkSampler sampler;
-    helpers::check_vulkan(
-        vkCreateSampler(*surface_device, &sampler_info, nullptr, &sampler));
+    helpers::check_vulkan(vkCreateSampler(*surface_device, &sampler_info, nullptr, &sampler));
 
     return std::make_shared<Sampler>(PrivateToken{}, surface_device, sampler);
+}
+
+PipelineDescriptors::~PipelineDescriptors() {
+    vkDestroyDescriptorSetLayout(device_->device, layout, nullptr);
+    vkDestroyDescriptorPool(device_->device, descriptor_pool, nullptr);
+}
+
+PipelineDescriptors::ptr PipelineDescriptors::create(
+    SurfaceDevice::ptr device, const std::vector<DescriptorInfo>& descriptors) {
+    std::map<VkDescriptorType, size_t> type_indices;
+    std::vector<VkDescriptorPoolSize> pool_sizes;
+
+    std::vector<VkDescriptorSetLayoutBinding> set_layouts;
+
+    for (const auto& desc_info : descriptors) {
+        if (type_indices.count(desc_info.type)) {
+            ++pool_sizes[type_indices[desc_info.type]].descriptorCount;
+        } else {
+            pool_sizes.push_back({desc_info.type, 1});
+            type_indices[desc_info.type] = pool_sizes.size() - 1;
+        }
+
+        auto& layout = set_layouts.emplace_back();
+        layout.binding = static_cast<uint32_t>(set_layouts.size() - 1);
+        layout.descriptorType = desc_info.type;
+        layout.descriptorCount = 1;
+        layout.stageFlags = desc_info.shader_stages;
+        layout.pImmutableSamplers = nullptr;  // Optional
+    }
+
+    VkDescriptorPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+    pool_info.pPoolSizes = pool_sizes.data();
+    pool_info.maxSets = static_cast<uint32_t>(descriptors.size());
+
+    VkDescriptorPool pool;
+    helpers::check_vulkan(vkCreateDescriptorPool(device->device, &pool_info, nullptr, &pool));
+
+    VkDescriptorSetLayoutCreateInfo layout_info{};
+    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_info.bindingCount = static_cast<uint32_t>(set_layouts.size());
+    layout_info.pBindings = set_layouts.data();
+
+    VkDescriptorSetLayout descriptor_layout;
+    vk::helpers::check_vulkan(
+        vkCreateDescriptorSetLayout(device->device, &layout_info, nullptr, &descriptor_layout));
+
+    std::vector<VkDescriptorSetLayout> layouts(1, descriptor_layout);
+    VkDescriptorSetAllocateInfo set_alloc_info{};
+    set_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    set_alloc_info.descriptorPool = pool;
+    set_alloc_info.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+    set_alloc_info.pSetLayouts = layouts.data();
+
+    VkDescriptorSet descriptor_set;
+    helpers::check_vulkan(
+        vkAllocateDescriptorSets(device->device, &set_alloc_info, &descriptor_set));
+
+    std::vector<VkWriteDescriptorSet> set_writes;
+
+    // we will store pointers to these elements, but by reserving the maximum size for each, we
+    // *won't* need to worry about reallocs moving them
+    std::vector<VkDescriptorBufferInfo> descriptor_buffer_infos;
+    descriptor_buffer_infos.reserve(descriptors.size());
+
+    std::vector<VkDescriptorImageInfo> descriptor_image_infos;
+    descriptor_image_infos.reserve(descriptors.size());
+
+    for (const auto& desc_info : descriptors) {
+        auto& descriptor_write = set_writes.emplace_back();
+        descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_write.dstSet = descriptor_set;
+        descriptor_write.dstBinding = static_cast<uint32_t>(
+            set_writes.size() - 1);  // this is counting up on vector size, but is meant to be
+                                     // synced with layout.binding above
+        descriptor_write.dstArrayElement = 0;
+        descriptor_write.descriptorCount = 1;
+        descriptor_write.descriptorType = desc_info.type;
+
+        descriptor_write.pBufferInfo = nullptr;
+        descriptor_write.pImageInfo = nullptr;        // Optional
+        descriptor_write.pTexelBufferView = nullptr;  // Optional
+
+        if (auto* buffer = std::get_if<DescriptorInfo::DBuffer>(&desc_info.object)) {
+            auto& buffer_info = descriptor_buffer_infos.emplace_back();
+            buffer_info.buffer = buffer->buffer->buffer;  // :)
+            buffer_info.offset = 0;
+            buffer_info.range = buffer->size;
+
+            descriptor_write.pBufferInfo = &buffer_info;
+        } else if (auto* texture = std::get_if<DescriptorInfo::DSampler>(&desc_info.object)) {
+            auto& image_info = descriptor_image_infos.emplace_back();
+            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            image_info.imageView = texture->texture->view;
+            image_info.sampler = texture->sampler->sampler;  // :)
+
+            descriptor_write.pImageInfo = &image_info;
+        } else {
+            // remove the added write?
+        }
+    }
+
+    vkUpdateDescriptorSets(device->device, static_cast<uint32_t>(set_writes.size()),
+                           set_writes.data(), 0, nullptr);
+
+    return std::make_shared<PipelineDescriptors>(PrivateToken{}, device, pool, descriptor_set,
+                                                 descriptor_layout);
 }
 
 }  // namespace spor::vk

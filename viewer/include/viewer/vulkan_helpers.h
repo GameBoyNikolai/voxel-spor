@@ -83,6 +83,22 @@ VkPresentModeKHR choose_swap_present_mode(
 
 VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t w, uint32_t h);
 
-VkRenderPass create_render_pass(VkDevice device, VkFormat format);
+VkRenderPass create_render_pass(VkDevice device, VkFormat color_format, std::optional<VkFormat> depth_format = std::nullopt);
+
+uint32_t choose_memory_type(VkPhysicalDevice p_device, uint32_t type_filter,
+                            VkMemoryPropertyFlags properties);
+
+VkFormat choose_supported_format(VkPhysicalDevice p_device, const std::vector<VkFormat>& candidates,
+                                 VkImageTiling tiling, VkFormatFeatureFlags features);
+
+bool has_stencil_component(VkFormat format);
+
+std::pair<VkImage, VkDeviceMemory> create_image(VkDevice device, VkPhysicalDevice p_device,
+                                                size_t width, size_t height, VkFormat format,
+                                                VkImageTiling tiling, VkImageUsageFlags usage,
+                                                VkMemoryPropertyFlags properties);
+
+VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format,
+                              VkImageAspectFlags aspect);
 
 }  // namespace spor::vk::helpers

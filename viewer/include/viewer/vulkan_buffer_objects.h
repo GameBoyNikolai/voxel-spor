@@ -3,8 +3,8 @@
 #include <variant>
 #include <vector>
 
-#include "viewer/vulkan_helpers.h"
 #include "viewer/vulkan_base_objects.h"
+#include "viewer/vulkan_helpers.h"
 #include "viewer/vulkan_render_objects.h"
 
 namespace spor::vk {
@@ -104,7 +104,12 @@ private:
 public:
     Texture(PrivateToken, SurfaceDevice::ptr surface_device, VkImage image, VkImageView view,
             VkDeviceMemory memory, size_t width, size_t height)
-        : surface_device_(surface_device), image(image), view(view), memory(memory), width(width), height(height) {}
+        : surface_device_(surface_device),
+          image(image),
+          view(view),
+          memory(memory),
+          width(width),
+          height(height) {}
 };
 
 CommandBuffer::ptr transition_texture(SurfaceDevice::ptr device, CommandPool::ptr pool,
@@ -112,7 +117,7 @@ CommandBuffer::ptr transition_texture(SurfaceDevice::ptr device, CommandPool::pt
                                       VkImageLayout to_layout);
 
 CommandBuffer::ptr texture_memcpy(SurfaceDevice::ptr device, CommandPool::ptr pool, Buffer::ptr src,
-                                 Texture::ptr dst);
+                                  Texture::ptr dst);
 
 class Sampler : public helpers::VulkanObject<Sampler> {
 public:
@@ -129,8 +134,7 @@ private:
     SurfaceDevice::ptr surface_device_;
 
 public:
-    Sampler(PrivateToken, SurfaceDevice::ptr surface_device,
-                   VkSampler sampler)
+    Sampler(PrivateToken, SurfaceDevice::ptr surface_device, VkSampler sampler)
         : surface_device_(surface_device), sampler(sampler) {}
 };
 

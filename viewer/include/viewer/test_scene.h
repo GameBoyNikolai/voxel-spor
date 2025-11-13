@@ -43,6 +43,8 @@ private:
 
     vk::PipelineDescriptors::ptr descriptors_;
 
+    vk::RenderPass::ptr render_pass_;
+
     vk::GraphicsPipeline::ptr graphics_pipeline_;
     vk::SwapChainFramebuffers::ptr framebuffers_;
 

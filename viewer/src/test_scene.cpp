@@ -127,16 +127,19 @@ void TestScene::setup() {
         vk::submit_commands(transfer_cmd, *surface_device_->queues.graphics_queue);
     }
 
-    graphics_pipeline_ = vk::GraphicsPipelineBuilder(surface_device_, swap_chain_)      //
-                             .add_vertex_shader(spor::shaders::test::vert)              //
-                             .add_fragment_shader(spor::shaders::test::frag)            //
-                             .set_vertex_descriptors(Vertex::binding_description(),     //
-                                                     Vertex::attribute_descriptions())  //
-                             .add_descriptor_set(descriptors_->layout)                  //
+    render_pass_ = vk::RenderPass::create(surface_device_, swap_chain_,
+                                          vk::DepthBuffer::default_format(surface_device_));
+
+    graphics_pipeline_ = vk::GraphicsPipelineBuilder(surface_device_, swap_chain_, render_pass_)  //
+                             .enable_depth_testing()                                              //
+                             .add_vertex_shader(spor::shaders::test::vert)                        //
+                             .add_fragment_shader(spor::shaders::test::frag)                      //
+                             .set_vertex_descriptors(Vertex::binding_description(),               //
+                                                     Vertex::attribute_descriptions())            //
+                             .add_descriptor_set(descriptors_->layout)                            //
                              .build();
 
-    framebuffers_
-        = vk::SwapChainFramebuffers::create(surface_device_, swap_chain_, graphics_pipeline_);
+    framebuffers_ = vk::SwapChainFramebuffers::create(surface_device_, swap_chain_, render_pass_);
 }
 
 vk::CommandBuffer::ptr TestScene::render(uint32_t framebuffer_index) {
@@ -145,8 +148,8 @@ vk::CommandBuffer::ptr TestScene::render(uint32_t framebuffer_index) {
     vk::record_commands rc(cmd_buffer_);
 
     VkRect2D view_rect{{0, 0}, swap_chain_->extent};
-    vk::render_pass rp(cmd_buffer_, graphics_pipeline_,
-                       framebuffers_->framebuffers[framebuffer_index], view_rect);
+    vk::begin_render_pass rp(cmd_buffer_, render_pass_,
+                             framebuffers_->framebuffers[framebuffer_index], view_rect);
 
     vkCmdBindPipeline(cmd_buffer_->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       graphics_pipeline_->graphics_pipeline);

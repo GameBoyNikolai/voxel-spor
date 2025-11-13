@@ -1,10 +1,24 @@
 #include "viewer/vulkan_render_objects.h"
 
 #include <algorithm>
+#include <array>
 
 namespace spor::vk {
 
-GraphicsPipeline::~GraphicsPipeline() {}
+RenderPass::~RenderPass() { vkDestroyRenderPass(*device_, render_pass, nullptr); }
+
+RenderPass::ptr RenderPass::create(SurfaceDevice::ptr device, VkFormat color_format,
+                                   std::optional<VkFormat> depth_stencil_format) {
+    auto render_pass = helpers::create_render_pass(*device, color_format, depth_stencil_format);
+
+    return std::make_shared<RenderPass>(PrivateToken{}, device, render_pass, color_format,
+                                        depth_stencil_format);
+}
+
+GraphicsPipeline::~GraphicsPipeline() {
+    vkDestroyPipeline(*surface_device_, graphics_pipeline, nullptr);
+    vkDestroyPipelineLayout(*surface_device_, pipeline_layout, nullptr);
+}
 
 void GraphicsPipelineBuilder::add_shader(VkShaderStageFlagBits stage, const uint32_t* shader_data,
                                          size_t len) {
@@ -37,6 +51,11 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_descriptors(
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_descriptor_set(
     VkDescriptorSetLayout descriptor_set) {
     descriptor_sets_.push_back(descriptor_set);
+    return *this;
+}
+
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::enable_depth_testing() {
+    depth_testing_ = true;
     return *this;
 }
 
@@ -134,6 +153,20 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
     color_blending.blendConstants[2] = 0.0f;  // Optional
     color_blending.blendConstants[3] = 0.0f;  // Optional
 
+    VkPipelineDepthStencilStateCreateInfo depth_stencil{};
+    if (depth_testing_) {
+        depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depth_stencil.depthTestEnable = VK_TRUE;
+        depth_stencil.depthWriteEnable = VK_TRUE;
+        depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS;
+        depth_stencil.depthBoundsTestEnable = VK_FALSE;
+        depth_stencil.minDepthBounds = 0.0f;  // Optional
+        depth_stencil.maxDepthBounds = 1.0f;  // Optional
+        depth_stencil.stencilTestEnable = VK_FALSE;
+        depth_stencil.front = {};  // Optional
+        depth_stencil.back = {};   // Optional
+    }
+
     VkPipelineLayoutCreateInfo pipeline_layout_info{};
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 
@@ -157,14 +190,13 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
     pipeline_info.pViewportState = &viewport_state;
     pipeline_info.pRasterizationState = &rasterizer;
     pipeline_info.pMultisampleState = &multisampling;
-    pipeline_info.pDepthStencilState = nullptr;  // Optional
+    pipeline_info.pDepthStencilState = depth_testing_ ? &depth_stencil : nullptr;
     pipeline_info.pColorBlendState = &color_blending;
     pipeline_info.pDynamicState = &dynamic_state_info;
 
     pipeline_info.layout = layout;
 
-    auto render_pass = helpers::create_render_pass(*surface_device_, swap_chain_->format);
-    pipeline_info.renderPass = render_pass;
+    pipeline_info.renderPass = *render_pass_;
     pipeline_info.subpass = 0;
 
     pipeline_info.basePipelineHandle = VK_NULL_HANDLE;  // Optional
@@ -183,12 +215,10 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
     descriptor_sets_.clear();
 
     return std::make_shared<GraphicsPipeline>(GraphicsPipeline::PrivateToken{}, surface_device_,
-                                              swap_chain_, render_pass, layout, pipeline);
+                                              swap_chain_, render_pass_, layout, pipeline);
 }
 
-CommandPool::~CommandPool() {
-    vkDestroyCommandPool(*surface_device_, command_pool, nullptr);
-}
+CommandPool::~CommandPool() { vkDestroyCommandPool(*surface_device_, command_pool, nullptr); }
 
 CommandPool::ptr CommandPool::create(SurfaceDevice::ptr surface_device) {
     helpers::VulkanQueueIndices queue_indices = surface_device->indices;
@@ -219,31 +249,75 @@ CommandBuffer::ptr CommandBuffer::create(SurfaceDevice::ptr surface_device,
     return std::make_shared<CommandBuffer>(PrivateToken{}, surface_device, buffer);
 }
 
-SwapChainFramebuffers::~SwapChainFramebuffers() {}  // TODO: destroy framebuffers
+DepthBuffer::~DepthBuffer() {
+    vkDestroyImageView(*surface_device_, view, nullptr);
+    vkDestroyImage(*surface_device_, image, nullptr);
+    vkFreeMemory(*surface_device_, memory, nullptr);
+}
+
+VkFormat DepthBuffer::default_format(SurfaceDevice::ptr surface_device) {
+    return helpers::choose_supported_format(
+        *surface_device,
+        {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
+        VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+}
+
+DepthBuffer::ptr DepthBuffer::create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain,
+                                     VkFormat format) {
+    auto [image, memory] = helpers::create_image(
+        surface_device->device, surface_device->physical_device, swap_chain->extent.width,
+        swap_chain->extent.height, format, VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    auto view
+        = helpers::create_image_view(*surface_device, image, format, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    return std::make_shared<DepthBuffer>(PrivateToken{}, surface_device, swap_chain, image, view,
+                                         memory);
+}
+
+DepthBuffer::ptr DepthBuffer::create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain) {
+    return create(surface_device, swap_chain, default_format(surface_device));
+}
+
+SwapChainFramebuffers::~SwapChainFramebuffers() {
+    for (const auto& framebuffer : framebuffers) {
+        vkDestroyFramebuffer(*surface_device_, framebuffer, nullptr);
+    }
+}
 
 SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surface_device,
                                                          SwapChain::ptr swap_chain,
-                                                         GraphicsPipeline::ptr pipeline) {
+                                                         RenderPass::ptr render_pass) {
+    DepthBuffer::ptr depth_buffer;
+    if (render_pass->depth_stencil_format) {
+        depth_buffer = DepthBuffer::create(surface_device, swap_chain);
+    }
+
     std::vector<VkFramebuffer> framebuffers(swap_chain->swap_chain_views.size());
 
     for (size_t i = 0; i < swap_chain->swap_chain_views.size(); i++) {
-        VkImageView attachments[] = {swap_chain->swap_chain_views[i]};
+        std::vector<VkImageView> attachments = {swap_chain->swap_chain_views[i]};
+        if (depth_buffer) {
+            attachments.push_back(depth_buffer->view);
+        }
 
         VkFramebufferCreateInfo framebuffer_info{};
         framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebuffer_info.renderPass = pipeline->render_pass;
-        framebuffer_info.attachmentCount = 1;
-        framebuffer_info.pAttachments = attachments;
+        framebuffer_info.renderPass = *render_pass;
+        framebuffer_info.attachmentCount = static_cast<uint32_t>(attachments.size());
+        framebuffer_info.pAttachments = attachments.data();
         framebuffer_info.width = swap_chain->extent.width;
         framebuffer_info.height = swap_chain->extent.height;
         framebuffer_info.layers = 1;
 
-        helpers::check_vulkan(vkCreateFramebuffer(*surface_device, &framebuffer_info,
-                                                  nullptr, &framebuffers[i]));
+        helpers::check_vulkan(
+            vkCreateFramebuffer(*surface_device, &framebuffer_info, nullptr, &framebuffers[i]));
     }
 
     return std::make_shared<SwapChainFramebuffers>(PrivateToken{}, surface_device, swap_chain,
-                                                   pipeline, std::move(framebuffers));
+                                                   render_pass, std::move(framebuffers),
+                                                   depth_buffer);
 }
 
 record_commands::record_commands(CommandBuffer::ptr command_buffer)
@@ -272,33 +346,38 @@ record_commands& record_commands::operator=(record_commands&& other) noexcept {
     return *this;
 }
 
-render_pass::render_pass(CommandBuffer::ptr command_buffer, GraphicsPipeline::ptr pipeline,
-                         VkFramebuffer framebuffer, VkRect2D area)
+begin_render_pass::begin_render_pass(CommandBuffer::ptr command_buffer, RenderPass::ptr render_pass,
+                                     VkFramebuffer framebuffer, VkRect2D area)
     : command_buffer_(command_buffer) {
     VkRenderPassBeginInfo render_pass_info{};
     render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    render_pass_info.renderPass = pipeline->render_pass;
+    render_pass_info.renderPass = *render_pass;
     render_pass_info.framebuffer = framebuffer;
 
     render_pass_info.renderArea = area;
 
-    VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
-    render_pass_info.clearValueCount = 1;
-    render_pass_info.pClearValues = &clear_color;
+    std::array<VkClearValue, 2> clear_values{};
+    clear_values[0].color = {0.f, 0.f, 0.f, 1.0f};
+    clear_values[1].depthStencil = {1.0f, 0};
+
+    render_pass_info.clearValueCount = static_cast<uint32_t>(clear_values.size());
+    render_pass_info.pClearValues = clear_values.data();
 
     vkCmdBeginRenderPass(command_buffer_->command_buffer, &render_pass_info,
                          VK_SUBPASS_CONTENTS_INLINE);
 }
 
-render_pass::~render_pass() {
+begin_render_pass::~begin_render_pass() {
     if (command_buffer_) {
         vkCmdEndRenderPass(command_buffer_->command_buffer);
     }
 }
 
-render_pass::render_pass(render_pass&& other) noexcept { *this = std::move(other); }
+begin_render_pass::begin_render_pass(begin_render_pass&& other) noexcept {
+    *this = std::move(other);
+}
 
-render_pass& render_pass::operator=(render_pass&& other) noexcept {
+begin_render_pass& begin_render_pass::operator=(begin_render_pass&& other) noexcept {
     std::swap(command_buffer_, other.command_buffer_);
 
     return *this;
