@@ -20,6 +20,7 @@ target_link_libraries(${EXE_NAME} PRIVATE voxel)
 target_link_libraries(${EXE_NAME} PRIVATE fmt::fmt)
 target_link_libraries(${EXE_NAME} PRIVATE SDL3::SDL3)
 target_link_libraries(${EXE_NAME} PRIVATE Vulkan::Vulkan)
+target_link_libraries(${EXE_NAME} PRIVATE tinyobjloader)
 
 target_include_directories(${EXE_NAME} PRIVATE include)
 target_include_directories(${EXE_NAME} PRIVATE SDL3::Headers)

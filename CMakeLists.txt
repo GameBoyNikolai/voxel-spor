@@ -71,6 +71,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(stb)
 
+# TinyOBJLoader
+FetchContent_Declare(
+    tinyobjloader
+    GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+    GIT_TAG e60d33385e2e4f7fa891513150f2532b5bbcb093
+    GIT_SHALLOW TRUE
+    GIT_PROGRESS TRUE
+)
+FetchContent_MakeAvailable(tinyobjloader)
+
 # Vulkan
 find_package(Vulkan COMPONENTS glslangValidator REQUIRED)
 
@@ -97,3 +107,4 @@ set_target_properties(SDL3-shared PROPERTIES FOLDER "External")
 set_target_properties(SDL_uclibc PROPERTIES FOLDER "External")
 set_target_properties(fmt PROPERTIES FOLDER "External")
 set_target_properties(glm PROPERTIES FOLDER "External")
+set_target_properties(tinyobjloader PROPERTIES FOLDER "External")

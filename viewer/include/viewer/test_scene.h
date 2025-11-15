@@ -4,6 +4,7 @@
 #include "viewer/vulkan_application.h"
 #include "viewer/vulkan_base_objects.h"
 #include "viewer/vulkan_render_objects.h"
+#include "viewer/model.h"
 
 namespace spor {
 
@@ -32,13 +33,15 @@ private:
     vk::CommandPool::ptr cmd_pool_;
     vk::CommandBuffer::ptr cmd_buffer_;
 
-    vk::Buffer::ptr vbo_;
-    vk::Buffer::ptr ibo_;
+    vk::Model::ptr model_;
+
+    //vk::Buffer::ptr vbo_;
+    //vk::Buffer::ptr ibo_;
 
     vk::Buffer::ptr mvp_ubo_;
     std::unique_ptr<vk::PersistentMapping> mvp_mapping_;
 
-    vk::Texture::ptr texture_;
+    //vk::Texture::ptr texture_;
     vk::Sampler::ptr sampler_;
 
     vk::PipelineDescriptors::ptr descriptors_;

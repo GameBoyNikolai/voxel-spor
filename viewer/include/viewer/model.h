@@ -1,0 +1,37 @@
+#pragma once
+
+#include <filesystem>
+
+#include "viewer/vulkan_buffer_objects.h"
+#include "viewer/vulkan_helpers.h"
+
+namespace spor::vk {
+
+namespace fs = std::filesystem;
+
+class Model : public helpers::VulkanObject<Model> {
+public:
+    static ptr from_obj(SurfaceDevice::ptr device, CommandPool::ptr cmd_pool, const fs::path& obj_path, const fs::path& tex_path);
+
+public:
+    VkVertexInputBindingDescription vertex_binding_description();
+    std::vector<VkVertexInputAttributeDescription> vertex_attribute_descriptions();
+
+    Texture::ptr texture() { return texture_; }
+
+    void draw(CommandBuffer::ptr cmd_buffer, PipelineDescriptors::ptr descriptors,
+              GraphicsPipeline::ptr pipeline);
+
+public:
+    Model(PrivateToken, SurfaceDevice::ptr device, Buffer::ptr vbo, Buffer::ptr ibo, Texture::ptr texture)
+        : device_(device), vbo_(vbo), ibo_(ibo), texture_(texture) {}
+
+private:
+    SurfaceDevice::ptr device_;
+
+    Buffer::ptr vbo_;
+    Buffer::ptr ibo_;
+    Texture::ptr texture_;
+};
+
+}  // namespace spor::vk
