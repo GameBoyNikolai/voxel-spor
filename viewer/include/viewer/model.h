@@ -2,6 +2,7 @@
 
 #include <filesystem>
 
+#include "viewer/glm_decl.h"
 #include "viewer/vulkan_buffer_objects.h"
 #include "viewer/vulkan_helpers.h"
 
@@ -25,6 +26,9 @@ public:
 public:
     Model(PrivateToken, SurfaceDevice::ptr device, Buffer::ptr vbo, Buffer::ptr ibo, Texture::ptr texture)
         : device_(device), vbo_(vbo), ibo_(ibo), texture_(texture) {}
+
+public:
+    glm::mat4 xfm = glm::mat4(1.0f);
 
 private:
     SurfaceDevice::ptr device_;

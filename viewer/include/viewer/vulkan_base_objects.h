@@ -59,6 +59,9 @@ public:
                       const std::set<std::string>& required_extensions);
 
 public:
+    VkSampleCountFlagBits get_max_msaa_samples() const;
+
+public:
     VkPhysicalDevice physical_device;
     VkSurfaceKHR surface;
     VkDevice device;

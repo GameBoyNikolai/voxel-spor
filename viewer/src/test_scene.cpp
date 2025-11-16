@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <iostream>
 
 #include "shaders/test.frag.inl"
 #include "shaders/test.vert.inl"
@@ -49,8 +50,6 @@ void TestScene::setup() {
     cmd_pool_ = vk::CommandPool::create(surface_device_);
     cmd_buffer_ = vk::CommandBuffer::create(surface_device_, cmd_pool_);
 
-    // texture_ = load_texture(surface_device_, cmd_pool_, *surface_device_->queues.graphics_queue,
-    //"C:/Users/nicho/Pictures/emotes/20220324_221902.jpg");
     sampler_ = vk::Sampler::create(surface_device_);
 
     model_ = vk::Model::from_obj(surface_device_, cmd_pool_,
@@ -114,17 +113,33 @@ vk::CommandBuffer::ptr TestScene::render(uint32_t framebuffer_index) {
 
 void TestScene::teardown() {}
 
-void TestScene::update_uniform_buffers() {
-    time += 0.01f;
+void TestScene::on_mouse_drag(MouseButton button, glm::vec2 offset) {
+    constexpr float kSpeed = glm::radians(0.1f);
+    if (button == MouseButton::kLeft) {
+        orbit_rot_ += glm::vec2(-1, 1) * offset * kSpeed;
+        orbit_rot_.y = glm::clamp(orbit_rot_.y, -glm::pi<float>() / 2.f + glm::epsilon<float>(),
+                                  glm::pi<float>() / 2.f - glm::epsilon<float>());
+    }
+}
 
+void TestScene::on_mouse_scroll(float offset) {
+    constexpr float kSpeed = 0.1f;
+    orbit_radius_ += offset * kSpeed;
+}
+
+void TestScene::update_uniform_buffers() {
     UniformBufferObject ubo{};
-    ubo.model
-        = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.view = glm::lookAt(glm::vec3(1.0f, 1.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+    ubo.model = model_->xfm;
+    ubo.view = glm::lookAt(orbit_radius_
+                               * glm::vec3(glm::cos(orbit_rot_.x) * glm::cos(orbit_rot_.y),
+                                           glm::sin(orbit_rot_.x) * glm::cos(orbit_rot_.y),
+                                           glm::sin(orbit_rot_.y)),  //
+                           glm::vec3(0.0f, 0.0f, 0.0f),              //
                            glm::vec3(0.0f, 0.0f, 1.0f));
+
     ubo.projection = glm::perspective(
         glm::radians(45.0f),
-        swap_chain_->extent.width / static_cast<float>(swap_chain_->extent.height), 0.1f, 10.0f);
+        swap_chain_->extent.width / static_cast<float>(swap_chain_->extent.height), 0.1f, 1000.0f);
 
     // Vulkan uses a flipped Projection space Y compared to OGL
     ubo.projection[1][1] *= -1.f;

@@ -372,8 +372,8 @@ PipelineDescriptors::ptr PipelineDescriptors::create(
         descriptor_write.descriptorType = desc_info.type;
 
         descriptor_write.pBufferInfo = nullptr;
-        descriptor_write.pImageInfo = nullptr;        // Optional
-        descriptor_write.pTexelBufferView = nullptr;  // Optional
+        descriptor_write.pImageInfo = nullptr;        
+        descriptor_write.pTexelBufferView = nullptr;  
 
         if (auto* buffer = std::get_if<DescriptorInfo::DBuffer>(&desc_info.object)) {
             auto& buffer_info = descriptor_buffer_infos.emplace_back();

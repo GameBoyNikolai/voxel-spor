@@ -13,9 +13,9 @@
 #include "fmt/format.h"
 #include "shaders/test.frag.inl"
 #include "shaders/test.vert.inl"
-#include "vulkan/vulkan.h"
-
+#include "viewer/glm_decl.h"
 #include "viewer/vulkan_render_objects.h"
+#include "vulkan/vulkan.h"
 
 namespace spor {
 
@@ -49,6 +49,9 @@ public:
     }
 
     ~AppWindowState() {
+        if (scene_) {
+            scene_->teardown();
+        }
         vkDeviceWaitIdle(device_->device);
     }
 
@@ -84,7 +87,7 @@ public:
         submit_info.pSignalSemaphores = signal_semaphores;
 
         vk::helpers::check_vulkan(vkQueueSubmit(*device_->queues.graphics_queue, 1, &submit_info,
-                                   sync_objects_->in_flight));
+                                                sync_objects_->in_flight));
 
         VkPresentInfoKHR present_info{};
         present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -100,6 +103,34 @@ public:
         present_info.pResults = nullptr;  // Optional
 
         vkQueuePresentKHR(*device_->queues.present_queue, &present_info);
+    }
+
+public:
+    void on_mouse_down(MouseButton button, glm::vec2 pos) {
+        last_mouse_pos_[button] = pos;
+
+        if (scene_) {
+            scene_->on_mouse_down(button);
+        }
+    }
+    void on_mouse_up(MouseButton button, glm::vec2 pos) {
+        if (scene_) {
+            scene_->on_mouse_up(button);
+        }
+    }
+
+    void on_mouse_drag(MouseButton button, glm::vec2 pos) {
+        if (scene_) {
+            scene_->on_mouse_drag(button, pos - last_mouse_pos_[button]);
+        }
+
+        last_mouse_pos_[button] = pos;
+    }
+
+    void on_mouse_scroll(float amount) {
+        if (scene_) {
+            scene_->on_mouse_scroll(amount);
+        }
     }
 
 public:
@@ -132,6 +163,8 @@ private:
     vk::DefaultRenderSyncObjects::ptr sync_objects_;
 
     std::unique_ptr<Scene> scene_{nullptr};
+
+    std::unordered_map<MouseButton, glm::vec2> last_mouse_pos_;
 };
 
 Window::Window(AppWindowState* state) : state_(state) {}
@@ -166,33 +199,77 @@ Window VulkanApplication::create_window(std::string title, size_t w, size_t h) {
     window_states_.push_back(
         std::make_unique<AppWindowState>(window_handle, instance_, surface_device));
 
+    window_to_state_[window] = window_states_.back().get();
+
     return Window(window_states_.back().get());
 }
 
 int VulkanApplication::run() {
     bool any_window_open = true;
     bool quit = false;
-    while (any_window_open && !quit) {
-        std::set<SDL_Window*> windows_to_kill;
 
+    std::set<SDL_Window*> windows_to_kill;
+
+    while (any_window_open && !quit) {
         SDL_Event event;
         while (SDL_PollEvent(&event) != 0) {
             // close the window when user clicks the X button or alt-f4s
-            if (event.type == SDL_EVENT_QUIT) {
-                quit = true;
-                break;
-            } else if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-                windows_to_kill.insert(SDL_GetWindowFromID(event.window.windowID));
+            switch (event.type) {
+                case SDL_EVENT_QUIT:
+                    quit = true;
+                    break;
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                    windows_to_kill.insert(SDL_GetWindowFromID(event.window.windowID));
+                    break;
+                case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+                    auto* w_state = window_to_state_[SDL_GetWindowFromID(event.button.windowID)];
+
+                    // only one mouse button can be down in a single event (AFAIK)
+                    MouseButton button = MouseButton::kNone;
+                    if (event.button.button & SDL_BUTTON_LMASK) {
+                        button = MouseButton::kLeft;
+                    } else if (event.button.button & SDL_BUTTON_RMASK) {
+                        button = MouseButton::kRight;
+                    }
+
+                    if (button != MouseButton::kNone) {
+                            if (event.button.down) {
+                                w_state->on_mouse_down(button,
+                                                       glm::vec2(event.button.x, event.button.y));
+                            } else {
+                                w_state->on_mouse_up(button,
+                                                     glm::vec2(event.button.x, event.button.y));
+                            }
+                    }
+                } break;
+                case SDL_EVENT_MOUSE_MOTION: {
+                    auto* w_state = window_to_state_[SDL_GetWindowFromID(event.button.windowID)];
+
+                    // multiple mouse buttons can participate in a drag
+                    if (event.button.button & SDL_BUTTON_LMASK) {
+                        for (auto& w_state : window_states_) {
+                            w_state->on_mouse_drag(MouseButton::kLeft,
+                                                   glm::vec2(event.button.x, event.button.y));
+                        }
+                    }
+
+                    if (event.button.button & SDL_BUTTON_RMASK) {
+                        for (auto& w_state : window_states_) {
+                            w_state->on_mouse_drag(MouseButton::kRight,
+                                                   glm::vec2(event.button.x, event.button.y));
+                        }
+                    }
+                } break;
+                case SDL_EVENT_MOUSE_WHEEL: {
+                    auto* w_state = window_to_state_[SDL_GetWindowFromID(event.wheel.windowID)];
+
+                    w_state->on_mouse_scroll(event.wheel.y);
+                } break;
             }
         }
 
         std::set<AppWindowState*> states_to_cull;
         for (auto& w_state : window_states_) {
-            if (windows_to_kill.count(*w_state->window())) {
-                states_to_cull.insert(w_state.get());
-                continue;
-            }
-
             if (w_state->is_requesting_close()) {
                 states_to_cull.insert(w_state.get());
                 continue;
@@ -201,11 +278,18 @@ int VulkanApplication::run() {
             w_state->draw();
         }
 
+        for (auto* window : windows_to_kill) {
+            states_to_cull.insert(window_to_state_[window]);
+            window_to_state_.erase(window);
+        }
+
         window_states_.erase(std::remove_if(window_states_.begin(), window_states_.end(),
                                             [&states_to_cull](const auto& element) {
                                                 return states_to_cull.count(element.get()) > 0;
                                             }),
                              window_states_.end());
+
+        windows_to_kill.clear();
 
         any_window_open = !window_states_.empty();
     }

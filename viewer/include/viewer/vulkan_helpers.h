@@ -75,6 +75,8 @@ VulkanSwapChainDetails get_swap_chain_support(VkPhysicalDevice device, VkSurface
 VkPhysicalDevice choose_physical_device(VkInstance instance, VkSurfaceKHR surface,
                                         const std::set<std::string>& required_extensions);
 
+VkSampleCountFlagBits get_max_msaa_samples(VkPhysicalDevice p_device);
+
 VkSurfaceFormatKHR choose_swap_surface_format(
     const std::vector<VkSurfaceFormatKHR>& available_formats);
 

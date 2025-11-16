@@ -20,11 +20,16 @@ public:
     TestScene& operator=(const TestScene&) = delete;
 
 public:
-    virtual void setup();
+    virtual void setup() override;
 
-    virtual vk::CommandBuffer::ptr render(uint32_t framebuffer_index);
+    virtual vk::CommandBuffer::ptr render(uint32_t framebuffer_index) override;
 
-    virtual void teardown();
+    virtual void teardown() override;
+
+public:
+    virtual void on_mouse_drag(MouseButton button, glm::vec2 offset) override;
+
+    virtual void on_mouse_scroll(float offset) override;
 
 private:
     void update_uniform_buffers();
@@ -41,6 +46,9 @@ private:
     vk::Buffer::ptr mvp_ubo_;
     std::unique_ptr<vk::PersistentMapping> mvp_mapping_;
 
+    glm::vec2 orbit_rot_{};
+    float orbit_radius_ = 5.f;
+
     //vk::Texture::ptr texture_;
     vk::Sampler::ptr sampler_;
 
@@ -50,8 +58,6 @@ private:
 
     vk::GraphicsPipeline::ptr graphics_pipeline_;
     vk::SwapChainFramebuffers::ptr framebuffers_;
-
-    float time = 0.f;
 };
 
 }  // namespace spor

@@ -3,13 +3,22 @@
 #include <memory>
 #include <string>
 
+#include "viewer/glm_decl.h"
 #include "viewer/vulkan_base_objects.h"
 #include "viewer/vulkan_render_objects.h"
+
+class SDL_Window;
 
 namespace spor {
 
 class AppWindowState;
 class VulkanApplication;
+
+enum class MouseButton {
+    kNone,
+    kLeft,
+    kRight,
+};
 
 class Scene {
 public:
@@ -17,13 +26,21 @@ public:
 
 public:
     void pre_setup(vk::Instance::ptr instance, vk::SurfaceDevice::ptr surface_device,
-               vk::SwapChain::ptr swap_chain);
+                   vk::SwapChain::ptr swap_chain);
 
     virtual void setup() = 0;
 
     virtual vk::CommandBuffer::ptr render(uint32_t framebuffer_index) = 0;
 
     virtual void teardown() = 0;
+
+public:
+    virtual void on_mouse_down(MouseButton button) {}
+    virtual void on_mouse_up(MouseButton button) {}
+
+    virtual void on_mouse_drag(MouseButton button, glm::vec2 offset) {}
+
+    virtual void on_mouse_scroll(float offset) {}
 
 protected:
     vk::Instance::ptr instance_;
@@ -69,6 +86,7 @@ private:
     vk::Instance::ptr instance_;
 
     std::vector<std::unique_ptr<AppWindowState>> window_states_;
+    std::unordered_map<SDL_Window*, AppWindowState*> window_to_state_;
 };
 
 }  // namespace spor

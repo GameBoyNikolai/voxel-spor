@@ -132,6 +132,10 @@ SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, std::shared_ptr<Win
                                            logical_device, indices, queues);
 }
 
+VkSampleCountFlagBits SurfaceDevice::get_max_msaa_samples() const {
+    return helpers::get_max_msaa_samples(*this);
+}
+
 SwapChain::~SwapChain() {
     for (const auto& image_view : swap_chain_views) {
         vkDestroyImageView(*surface_device_, image_view, nullptr);
