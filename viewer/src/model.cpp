@@ -140,19 +140,21 @@ Model::ptr Model::from_obj(SurfaceDevice::ptr device, CommandPool::ptr cmd_pool,
     auto vbo = create_vertex_buffer(device, vertices.size(), sizeof(decltype(vertices.front())));
     auto ibo = create_index_buffer(device, indices.size(), sizeof(decltype(indices.front())));
 
+    auto graphics_queue = device->queues.graphics.queue;
     {
         auto transfer_buf = create_and_fill_transfer_buffer(device, vertices);
         auto transfer_cmd = buffer_memcpy(device, cmd_pool, transfer_buf, vbo, vbo->size());
-        vk::submit_commands(transfer_cmd, *device->queues.graphics_queue);
+        vk::submit_commands(transfer_cmd, graphics_queue);
     }
 
     {
         auto transfer_buf = create_and_fill_transfer_buffer(device, indices);
         auto transfer_cmd = buffer_memcpy(device, cmd_pool, transfer_buf, ibo, ibo->size());
-        vk::submit_commands(transfer_cmd, *device->queues.graphics_queue);
+        vk::submit_commands(transfer_cmd, graphics_queue);
     }
 
-    auto texture = helpers::load_texture(device, cmd_pool, *device->queues.graphics_queue,
+    auto texture
+        = helpers::load_texture(device, cmd_pool, graphics_queue,
                                          tex_path.generic_string());
 
     return std::make_shared<Model>(PrivateToken{}, device, vbo, ibo, texture);

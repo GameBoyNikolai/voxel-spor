@@ -86,7 +86,7 @@ public:
         submit_info.signalSemaphoreCount = 1;
         submit_info.pSignalSemaphores = signal_semaphores;
 
-        vk::helpers::check_vulkan(vkQueueSubmit(*device_->queues.graphics_queue, 1, &submit_info,
+        vk::helpers::check_vulkan(vkQueueSubmit(device_->queues.graphics.queue, 1, &submit_info,
                                                 sync_objects_->in_flight));
 
         VkPresentInfoKHR present_info{};
@@ -102,7 +102,7 @@ public:
 
         present_info.pResults = nullptr;  // Optional
 
-        vkQueuePresentKHR(*device_->queues.present_queue, &present_info);
+        vkQueuePresentKHR(device_->queues.present.queue, &present_info);
     }
 
 public:
@@ -233,13 +233,12 @@ int VulkanApplication::run() {
                     }
 
                     if (button != MouseButton::kNone) {
-                            if (event.button.down) {
-                                w_state->on_mouse_down(button,
-                                                       glm::vec2(event.button.x, event.button.y));
-                            } else {
-                                w_state->on_mouse_up(button,
-                                                     glm::vec2(event.button.x, event.button.y));
-                            }
+                        if (event.button.down) {
+                            w_state->on_mouse_down(button,
+                                                   glm::vec2(event.button.x, event.button.y));
+                        } else {
+                            w_state->on_mouse_up(button, glm::vec2(event.button.x, event.button.y));
+                        }
                     }
                 } break;
                 case SDL_EVENT_MOUSE_MOTION: {
@@ -247,17 +246,13 @@ int VulkanApplication::run() {
 
                     // multiple mouse buttons can participate in a drag
                     if (event.button.button & SDL_BUTTON_LMASK) {
-                        for (auto& w_state : window_states_) {
-                            w_state->on_mouse_drag(MouseButton::kLeft,
-                                                   glm::vec2(event.button.x, event.button.y));
-                        }
+                        w_state->on_mouse_drag(MouseButton::kLeft,
+                                               glm::vec2(event.button.x, event.button.y));
                     }
 
                     if (event.button.button & SDL_BUTTON_RMASK) {
-                        for (auto& w_state : window_states_) {
-                            w_state->on_mouse_drag(MouseButton::kRight,
-                                                   glm::vec2(event.button.x, event.button.y));
-                        }
+                        w_state->on_mouse_drag(MouseButton::kRight,
+                                               glm::vec2(event.button.x, event.button.y));
                     }
                 } break;
                 case SDL_EVENT_MOUSE_WHEEL: {

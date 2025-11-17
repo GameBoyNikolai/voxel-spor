@@ -55,6 +55,10 @@ Buffer::ptr create_index_buffer(SurfaceDevice::ptr surface_device, size_t elemen
 Buffer::ptr create_uniform_buffer(SurfaceDevice::ptr surface_device, size_t element_count,
                                   size_t element_size);
 
+Buffer::ptr create_storage_buffer(SurfaceDevice::ptr surface_device,
+                                  VkBufferUsageFlags aliasing, size_t element_count,
+                                  size_t element_size);
+
 template <typename T> Buffer::ptr create_and_fill_transfer_buffer(SurfaceDevice::ptr surface_device,
                                                                   const std::vector<T>& data) {
     auto buffer

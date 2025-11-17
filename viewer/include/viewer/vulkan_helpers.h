@@ -63,19 +63,32 @@ struct VulkanSwapChainDetails {
     std::vector<VkPresentModeKHR> present_modes;
 };
 
+struct VulkanDeviceCapabilities {
+    std::set<uint32_t> graphics_queues;
+    std::set<uint32_t> present_queues;
+    std::set<uint32_t> compute_queues;
+
+    VkSurfaceCapabilitiesKHR surface_capabilities;
+    std::vector<VkSurfaceFormatKHR> surface_formats;
+    std::vector<VkPresentModeKHR> present_modes;
+
+    VkPhysicalDeviceProperties device_properties;
+    VkPhysicalDeviceFeatures device_features;
+
+    std::vector<VkExtensionProperties> available_extensions;
+
+    VkSampleCountFlagBits max_msaa_samples;
+
+    bool valid(const std::set<std::string>& required_extensions);
+};
+
 void check_vulkan(VkResult result);
 
-VulkanQueueIndices get_device_queues(VkPhysicalDevice device, VkSurfaceKHR surface);
-
-bool device_supports_extensions(VkPhysicalDevice device,
-                                const std::set<std::string>& required_extensions);
-
-VulkanSwapChainDetails get_swap_chain_support(VkPhysicalDevice device, VkSurfaceKHR surface);
+VulkanDeviceCapabilities get_full_device_capabilities(VkPhysicalDevice device,
+                                                      VkSurfaceKHR surface);
 
 VkPhysicalDevice choose_physical_device(VkInstance instance, VkSurfaceKHR surface,
                                         const std::set<std::string>& required_extensions);
-
-VkSampleCountFlagBits get_max_msaa_samples(VkPhysicalDevice p_device);
 
 VkSurfaceFormatKHR choose_swap_surface_format(
     const std::vector<VkSurfaceFormatKHR>& available_formats);

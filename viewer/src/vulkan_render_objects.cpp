@@ -221,13 +221,11 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
 CommandPool::~CommandPool() { vkDestroyCommandPool(*surface_device_, command_pool, nullptr); }
 
 CommandPool::ptr CommandPool::create(SurfaceDevice::ptr surface_device) {
-    helpers::VulkanQueueIndices queue_indices = surface_device->indices;
-
+    // TODO: allow command pools to be created on different queues
     VkCommandPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    // guaranteed to be present, but worth checking
-    pool_info.queueFamilyIndex = queue_indices.graphics_family.value();
+    pool_info.queueFamilyIndex = surface_device->queues.graphics.index;
 
     VkCommandPool pool;
     helpers::check_vulkan(vkCreateCommandPool(*surface_device, &pool_info, nullptr, &pool));

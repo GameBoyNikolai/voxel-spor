@@ -37,6 +37,8 @@ Buffer::ptr Buffer::create(SurfaceDevice::ptr surface_device, VkBufferUsageFlags
         props = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     } else if (usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
         props = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    } else if (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) {
+        props = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     } else {
         props = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     }
@@ -84,6 +86,14 @@ Buffer::ptr create_uniform_buffer(SurfaceDevice::ptr surface_device, size_t elem
                                   size_t element_size) {
     return Buffer::create(surface_device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, element_count,
                           element_size);
+}
+
+Buffer::ptr create_storage_buffer(SurfaceDevice::ptr surface_device, VkBufferUsageFlags aliasing,
+                                  size_t element_count, size_t element_size) {
+    return Buffer::create(
+        surface_device,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | aliasing,
+        element_count, element_size);
 }
 
 Buffer::ptr create_and_fill_transfer_buffer(SurfaceDevice::ptr surface_device,
@@ -372,8 +382,8 @@ PipelineDescriptors::ptr PipelineDescriptors::create(
         descriptor_write.descriptorType = desc_info.type;
 
         descriptor_write.pBufferInfo = nullptr;
-        descriptor_write.pImageInfo = nullptr;        
-        descriptor_write.pTexelBufferView = nullptr;  
+        descriptor_write.pImageInfo = nullptr;
+        descriptor_write.pTexelBufferView = nullptr;
 
         if (auto* buffer = std::get_if<DescriptorInfo::DBuffer>(&desc_info.object)) {
             auto& buffer_info = descriptor_buffer_infos.emplace_back();

@@ -1,4 +1,4 @@
-#include "viewer\test_scene.h"
+#include "viewer\test_compute_scene.h"
 
 #include <array>
 #include <cstddef>
@@ -12,13 +12,15 @@
 
 namespace spor {
 
+namespace {
 struct UniformBufferObject {
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 projection;
 };
+}  // namespace
 
-void TestScene::setup() {
+void TestComputeScene::setup() {
     mvp_ubo_ = vk::create_uniform_buffer(surface_device_, 1, sizeof(UniformBufferObject));
     mvp_mapping_ = std::make_unique<vk::PersistentMapping>(mvp_ubo_);
 
@@ -55,7 +57,7 @@ void TestScene::setup() {
     framebuffers_ = vk::SwapChainFramebuffers::create(surface_device_, swap_chain_, render_pass_);
 }
 
-vk::CommandBuffer::ptr TestScene::render(uint32_t framebuffer_index) {
+vk::CommandBuffer::ptr TestComputeScene::render(uint32_t framebuffer_index) {
     update_uniform_buffers();
 
     vk::record_commands rc(cmd_buffer_);
@@ -86,9 +88,9 @@ vk::CommandBuffer::ptr TestScene::render(uint32_t framebuffer_index) {
     return cmd_buffer_;
 }
 
-void TestScene::teardown() {}
+void TestComputeScene::teardown() {}
 
-void TestScene::on_mouse_drag(MouseButton button, glm::vec2 offset) {
+void TestComputeScene::on_mouse_drag(MouseButton button, glm::vec2 offset) {
     constexpr float kSpeed = glm::radians(0.1f);
     if (button == MouseButton::kLeft) {
         orbit_rot_ += glm::vec2(-1, 1) * offset * kSpeed;
@@ -97,12 +99,12 @@ void TestScene::on_mouse_drag(MouseButton button, glm::vec2 offset) {
     }
 }
 
-void TestScene::on_mouse_scroll(float offset) {
+void TestComputeScene::on_mouse_scroll(float offset) {
     constexpr float kSpeed = 0.1f;
     orbit_radius_ += offset * kSpeed;
 }
 
-void TestScene::update_uniform_buffers() {
+void TestComputeScene::update_uniform_buffers() {
     UniformBufferObject ubo{};
     ubo.model = model_->xfm;
     ubo.view = glm::lookAt(orbit_radius_

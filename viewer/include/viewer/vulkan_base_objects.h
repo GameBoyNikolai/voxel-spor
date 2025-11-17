@@ -47,6 +47,18 @@ private:
     SDL_Window* window_;
 };
 
+struct VulkanQueueInfo {
+    struct QueueBundle {
+        uint32_t index;
+        VkQueue queue;
+    };
+
+    QueueBundle graphics;  // compute-enabled graphics queue
+    QueueBundle present;
+
+    std::optional<QueueBundle> compute;
+};
+
 class SurfaceDevice : public helpers::VulkanObject<SurfaceDevice> {
 public:
     ~SurfaceDevice();
@@ -59,28 +71,26 @@ public:
                       const std::set<std::string>& required_extensions);
 
 public:
-    VkSampleCountFlagBits get_max_msaa_samples() const;
-
-public:
     VkPhysicalDevice physical_device;
     VkSurfaceKHR surface;
     VkDevice device;
 
-    helpers::VulkanQueueIndices indices;
-    helpers::VulkanQueues queues;
+    VulkanQueueInfo queues;
+
+    helpers::VulkanDeviceCapabilities capabilities;
 
 public:
     SurfaceDevice(PrivateToken, std::shared_ptr<Instance> instance,
                   std::shared_ptr<WindowHandle> window, VkPhysicalDevice p_device,
-                  VkSurfaceKHR surface, VkDevice device, helpers::VulkanQueueIndices indices,
-                  helpers::VulkanQueues queues)
+                  VkSurfaceKHR surface, VkDevice device, VulkanQueueInfo queues,
+                  helpers::VulkanDeviceCapabilities capabilities)
         : instance_(instance),
           window_(window),
           physical_device(p_device),
           surface(surface),
           device(device),
-          indices(indices),
-          queues(queues) {}
+          queues(queues),
+          capabilities(std::move(capabilities)) {}
 
 private:
     std::shared_ptr<Instance> instance_;

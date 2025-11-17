@@ -83,20 +83,41 @@ SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, std::shared_ptr<Win
         helpers::check_sdl(-1);
     }
 
+    // If a physical device was chosen without an exception, the capabilities are guaranteed to be
+    // valid
     VkPhysicalDevice physical_device
         = helpers::choose_physical_device(*inst, surface, required_extensions);
+    auto device_capabilities = helpers::get_full_device_capabilities(physical_device, surface);
 
-    helpers::VulkanQueueIndices indices = helpers::get_device_queues(physical_device, surface);
+    std::set<uint32_t> gcomp_queues;
+    std::set_intersection(
+        device_capabilities.graphics_queues.begin(), device_capabilities.graphics_queues.end(),
+        device_capabilities.compute_queues.begin(), device_capabilities.compute_queues.end(),
+        std::inserter(gcomp_queues, gcomp_queues.end()));
+
+    std::set<uint32_t> comp_only_queues;
+    std::set_difference(
+        device_capabilities.compute_queues.begin(), device_capabilities.compute_queues.end(),
+        device_capabilities.graphics_queues.begin(), device_capabilities.graphics_queues.end(),
+        std::inserter(gcomp_queues, gcomp_queues.end()));
+
+    if (gcomp_queues.empty()) {
+        throw std::runtime_error("No queue exists that supports both graphics and compute");
+    }
+
+    uint32_t gcomp_index = *gcomp_queues.begin();
+    uint32_t present_index = *device_capabilities.present_queues.begin();
+    std::set<uint32_t> all_queues = {gcomp_index, present_index};
+
+    std::optional<uint32_t> comp_only_index;
+    if (!comp_only_queues.empty()) {
+        comp_only_index = *comp_only_queues.begin();
+        all_queues.insert(*comp_only_index);
+    }
 
     std::vector<VkDeviceQueueCreateInfo> queue_create_infos;
-
-    // our chosen physical device was guaranteed to have both of these queues, but might be good
-    // to validate that later
     float priority = 1.0f;
-    for (uint32_t family : std::set<uint32_t>({
-             *indices.graphics_family,
-             *indices.present_family,
-         })) {
+    for (uint32_t family : all_queues) {
         auto& queue_create_info = queue_create_infos.emplace_back();
         queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
         queue_create_info.queueFamilyIndex = family;
@@ -126,14 +147,23 @@ SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, std::shared_ptr<Win
     VkDevice logical_device;
     helpers::check_vulkan(vkCreateDevice(physical_device, &create_info, nullptr, &logical_device));
 
-    helpers::VulkanQueues queues(indices, logical_device);
+    VulkanQueueInfo queue_info;
+
+    queue_info.graphics.index = gcomp_index;
+    vkGetDeviceQueue(logical_device, queue_info.graphics.index, 0, &queue_info.graphics.queue);
+
+    queue_info.present.index = present_index;
+    vkGetDeviceQueue(logical_device, queue_info.present.index, 0, &queue_info.present.queue);
+
+    if (comp_only_index) {
+        auto& comp_queue = queue_info.compute.emplace();
+        comp_queue.index = *comp_only_index;
+        vkGetDeviceQueue(logical_device, comp_queue.index, 0, &comp_queue.queue);
+    }
 
     return std::make_shared<SurfaceDevice>(PrivateToken{}, inst, window, physical_device, surface,
-                                           logical_device, indices, queues);
-}
-
-VkSampleCountFlagBits SurfaceDevice::get_max_msaa_samples() const {
-    return helpers::get_max_msaa_samples(*this);
+                                           logical_device, queue_info,
+                                           std::move(device_capabilities));
 }
 
 SwapChain::~SwapChain() {
@@ -144,17 +174,16 @@ SwapChain::~SwapChain() {
 }
 
 SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, uint32_t h) {
-    auto swap_chain_details
-        = helpers::get_swap_chain_support(surface_device->physical_device, surface_device->surface);
+    const auto& device_capabilities = surface_device->capabilities;
 
-    auto format = helpers::choose_swap_surface_format(swap_chain_details.formats);
-    auto present_mode = helpers::choose_swap_present_mode(swap_chain_details.present_modes);
-    auto extent = helpers::choose_swap_extent(swap_chain_details.capabilities, w, h);
+    auto format = helpers::choose_swap_surface_format(device_capabilities.surface_formats);
+    auto present_mode = helpers::choose_swap_present_mode(device_capabilities.present_modes);
+    auto extent = helpers::choose_swap_extent(device_capabilities.surface_capabilities, w, h);
 
-    uint32_t image_count = swap_chain_details.capabilities.minImageCount + 1;
-    if (swap_chain_details.capabilities.maxImageCount > 0
-        && image_count > swap_chain_details.capabilities.maxImageCount) {
-        image_count = swap_chain_details.capabilities.maxImageCount;
+    uint32_t image_count = device_capabilities.surface_capabilities.minImageCount + 1;
+    if (device_capabilities.surface_capabilities.maxImageCount > 0
+        && image_count > device_capabilities.surface_capabilities.maxImageCount) {
+        image_count = device_capabilities.surface_capabilities.maxImageCount;
     }
 
     VkSwapchainCreateInfoKHR chain_create_info{};
@@ -172,11 +201,11 @@ SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, 
                                                 // involved in off screen rendering?
 
     // at this point, we have ensured validity of the chosen device's queues
-    auto indices = surface_device->indices;
-    uint32_t queueFamilyIndices[]
-        = {indices.graphics_family.value(), indices.present_family.value()};
+    auto queues = surface_device->queues;
+    uint32_t queueFamilyIndices[] = {queues.graphics.index, queues.present.index};
+    // TODO: will compute need to be included here?
 
-    if (indices.graphics_family != indices.present_family) {
+    if (queues.graphics.index != queues.present.index) {
         chain_create_info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
         chain_create_info.queueFamilyIndexCount = 2;
         chain_create_info.pQueueFamilyIndices = queueFamilyIndices;
@@ -186,7 +215,7 @@ SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, 
         chain_create_info.pQueueFamilyIndices = nullptr;  // Optional
     }
 
-    chain_create_info.preTransform = swap_chain_details.capabilities.currentTransform;
+    chain_create_info.preTransform = device_capabilities.surface_capabilities.currentTransform;
 
     chain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;  // for blending windows
 
@@ -226,8 +255,8 @@ SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, 
         view_create_info.subresourceRange.baseArrayLayer = 0;
         view_create_info.subresourceRange.layerCount = 1;
 
-        helpers::check_vulkan(vkCreateImageView(*surface_device, &view_create_info, nullptr,
-                                                &swap_chain_views[i]));
+        helpers::check_vulkan(
+            vkCreateImageView(*surface_device, &view_create_info, nullptr, &swap_chain_views[i]));
     }
 
     return std::make_shared<SwapChain>(PrivateToken{}, surface_device, swap_chain,

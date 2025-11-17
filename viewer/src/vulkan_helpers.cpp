@@ -17,115 +17,143 @@ void check_vulkan(VkResult result) {
     }
 }
 
-VulkanQueueIndices get_device_queues(VkPhysicalDevice device, VkSurfaceKHR surface) {
-    uint32_t family_count = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &family_count, nullptr);
-
-    std::vector<VkQueueFamilyProperties> queue_families(family_count);
-
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &family_count, queue_families.data());
-
-    VulkanQueueIndices queues;
-    for (uint32_t queue_index = 0; queue_index < queue_families.size(); ++queue_index) {
-        if (queue_families[queue_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            queues.graphics_family = queue_index;
-        }
-
-        VkBool32 present_support = false;
-        helpers::check_vulkan(
-            vkGetPhysicalDeviceSurfaceSupportKHR(device, queue_index, surface, &present_support));
-        if (present_support) {
-            queues.present_family = queue_index;
-        }
-    }
-
-    return queues;
-}
-
-bool device_supports_extensions(VkPhysicalDevice device,
-                                const std::set<std::string>& required_extensions) {
-    uint32_t count;
-    helpers::check_vulkan(vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr));
-
-    std::vector<VkExtensionProperties> available_extensions(count);
-    helpers::check_vulkan(
-        vkEnumerateDeviceExtensionProperties(device, nullptr, &count, available_extensions.data()));
-
+bool VulkanDeviceCapabilities::valid(const std::set<std::string>& required_extensions) {
     auto remaining_extensions = required_extensions;
     for (const auto& extension : available_extensions) {
         remaining_extensions.erase(extension.extensionName);
     }
 
-    return remaining_extensions.empty();
+    bool all_extensions_present = remaining_extensions.empty();
+
+    return !graphics_queues.empty()           //
+           && !present_queues.empty()         //
+           && !compute_queues.empty()         //
+           && !surface_formats.empty()        //
+           && !present_modes.empty()          //
+           && all_extensions_present          //
+           && device_features.geometryShader  //
+           && device_features.samplerAnisotropy;
 }
 
-VulkanSwapChainDetails get_swap_chain_support(VkPhysicalDevice device, VkSurfaceKHR surface) {
-    VulkanSwapChainDetails details;
+VulkanDeviceCapabilities get_full_device_capabilities(VkPhysicalDevice device,
+                                                      VkSurfaceKHR surface) {
+    VulkanDeviceCapabilities capabilities{};
 
-    helpers::check_vulkan(
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities));
+    // queues
+    {
+        uint32_t family_count = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &family_count, nullptr);
 
-    uint32_t format_count;
-    helpers::check_vulkan(
-        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, nullptr));
-    if (format_count > 0) {
-        details.formats.resize(format_count);
-        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count,
-                                             details.formats.data());
+        std::vector<VkQueueFamilyProperties> queue_families(family_count);
+
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &family_count, queue_families.data());
+
+        VulkanQueueIndices queues;
+        for (uint32_t queue_index = 0; queue_index < queue_families.size(); ++queue_index) {
+            if (queue_families[queue_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                capabilities.graphics_queues.insert(queue_index);
+            }
+            if (queue_families[queue_index].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+                capabilities.compute_queues.insert(queue_index);
+            }
+
+            VkBool32 present_support = false;
+            helpers::check_vulkan(vkGetPhysicalDeviceSurfaceSupportKHR(device, queue_index, surface,
+                                                                       &present_support));
+            if (present_support) {
+                capabilities.present_queues.insert(queue_index);
+            }
+        }
     }
 
-    uint32_t present_modes_count;
-    check_vulkan(
-        vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_modes_count, nullptr));
-    if (present_modes_count > 0) {
-        details.present_modes.resize(present_modes_count);
-        vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_modes_count,
-                                                  details.present_modes.data());
+    // swap chain
+    {
+        helpers::check_vulkan(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+            device, surface, &capabilities.surface_capabilities));
+
+        uint32_t format_count;
+        helpers::check_vulkan(
+            vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, nullptr));
+        if (format_count > 0) {
+            capabilities.surface_formats.resize(format_count);
+            vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count,
+                                                 capabilities.surface_formats.data());
+        }
+
+        uint32_t present_modes_count;
+        check_vulkan(vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface,
+                                                               &present_modes_count, nullptr));
+        if (present_modes_count > 0) {
+            capabilities.present_modes.resize(present_modes_count);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_modes_count,
+                                                      capabilities.present_modes.data());
+        }
     }
 
-    return details;
+    // extensions
+    {
+        uint32_t count;
+        helpers::check_vulkan(
+            vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr));
+
+        capabilities.available_extensions.resize(count);
+        helpers::check_vulkan(vkEnumerateDeviceExtensionProperties(
+            device, nullptr, &count, capabilities.available_extensions.data()));
+    }
+
+    // device info
+    {
+        vkGetPhysicalDeviceProperties(device, &capabilities.device_properties);
+        vkGetPhysicalDeviceFeatures(device, &capabilities.device_features);
+    }
+
+    // msaa
+    {
+        VkSampleCountFlags counts
+            = capabilities.device_properties.limits.framebufferColorSampleCounts
+              & capabilities.device_properties.limits.framebufferDepthSampleCounts;
+
+        capabilities.max_msaa_samples = VK_SAMPLE_COUNT_1_BIT;
+
+        if (counts & VK_SAMPLE_COUNT_2_BIT) {
+            capabilities.max_msaa_samples = VK_SAMPLE_COUNT_2_BIT;
+        }
+        if (counts & VK_SAMPLE_COUNT_4_BIT) {
+            capabilities.max_msaa_samples = VK_SAMPLE_COUNT_4_BIT;
+        }
+        if (counts & VK_SAMPLE_COUNT_8_BIT) {
+            capabilities.max_msaa_samples = VK_SAMPLE_COUNT_8_BIT;
+        }
+        if (counts & VK_SAMPLE_COUNT_16_BIT) {
+            capabilities.max_msaa_samples = VK_SAMPLE_COUNT_16_BIT;
+        }
+        if (counts & VK_SAMPLE_COUNT_32_BIT) {
+            capabilities.max_msaa_samples = VK_SAMPLE_COUNT_32_BIT;
+        }
+        if (counts & VK_SAMPLE_COUNT_64_BIT) {
+            capabilities.max_msaa_samples = VK_SAMPLE_COUNT_64_BIT;
+        }
+    }
+
+    return capabilities;
 }
 
 size_t device_score(VkPhysicalDevice device, VkSurfaceKHR surface,
                     const std::set<std::string>& required_extensions) {
-    VkPhysicalDeviceProperties properties;
-    VkPhysicalDeviceFeatures features;
-
-    vkGetPhysicalDeviceProperties(device, &properties);
-    vkGetPhysicalDeviceFeatures(device, &features);
-
-    // Application can't function without geometry shaders
-    if (!features.geometryShader) {
-        return 0;
-    }
-
-    if (!features.samplerAnisotropy) {
-        return 0;
-    }
-
-    if (!get_device_queues(device, surface).valid()) {
-        return 0;
-    }
-
-    if (!device_supports_extensions(device, required_extensions)) {
-        return 0;
-    }
-
-    // Note: only query swap chain support if the swap chain extension is present
-    auto swap_chain_support = get_swap_chain_support(device, surface);
-    if (swap_chain_support.formats.empty() || swap_chain_support.present_modes.empty()) {
+    auto device_caps = get_full_device_capabilities(device, surface);
+    if (!device_caps.valid(required_extensions)) {
         return 0;
     }
 
     size_t score = 0;
 
     // Discrete GPUs have a significant performance advantage
-    if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+    if (device_caps.device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
         score += 1000;
     }
 
     // Maximum possible size of textures affects graphics quality
-    score += properties.limits.maxImageDimension2D;
+    score += device_caps.device_properties.limits.maxImageDimension2D;
 
     return score;
 }
@@ -152,34 +180,6 @@ VkPhysicalDevice choose_physical_device(VkInstance instance, VkSurfaceKHR surfac
     } else {
         throw std::runtime_error("Vulkan Error: no suitable devices found");
     }
-}
-
-VkSampleCountFlagBits get_max_msaa_samples(VkPhysicalDevice p_device) {
-    VkPhysicalDeviceProperties device_properties;
-    vkGetPhysicalDeviceProperties(p_device, &device_properties);
-
-    VkSampleCountFlags counts = device_properties.limits.framebufferColorSampleCounts
-                                & device_properties.limits.framebufferDepthSampleCounts;
-    if (counts & VK_SAMPLE_COUNT_64_BIT) {
-        return VK_SAMPLE_COUNT_64_BIT;
-    }
-    if (counts & VK_SAMPLE_COUNT_32_BIT) {
-        return VK_SAMPLE_COUNT_32_BIT;
-    }
-    if (counts & VK_SAMPLE_COUNT_16_BIT) {
-        return VK_SAMPLE_COUNT_16_BIT;
-    }
-    if (counts & VK_SAMPLE_COUNT_8_BIT) {
-        return VK_SAMPLE_COUNT_8_BIT;
-    }
-    if (counts & VK_SAMPLE_COUNT_4_BIT) {
-        return VK_SAMPLE_COUNT_4_BIT;
-    }
-    if (counts & VK_SAMPLE_COUNT_2_BIT) {
-        return VK_SAMPLE_COUNT_2_BIT;
-    }
-
-    return VK_SAMPLE_COUNT_1_BIT;
 }
 
 VkSurfaceFormatKHR choose_swap_surface_format(
