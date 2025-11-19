@@ -20,6 +20,20 @@ GraphicsPipeline::~GraphicsPipeline() {
     vkDestroyPipelineLayout(*surface_device_, pipeline_layout, nullptr);
 }
 
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_vertex_shader(
+    const std::vector<uint32_t>& shader) {
+    add_shader(VK_SHADER_STAGE_VERTEX_BIT, shader.data(), shader.size());
+
+    return *this;
+}
+
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_fragment_shader(
+    const std::vector<uint32_t>& shader) {
+    add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, shader.data(), shader.size());
+
+    return *this;
+}
+
 void GraphicsPipelineBuilder::add_shader(VkShaderStageFlagBits stage, const uint32_t* shader_data,
                                          size_t len) {
     VkShaderModuleCreateInfo create_info{};
@@ -45,6 +59,12 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_descriptors(
     std::vector<VkVertexInputAttributeDescription> attrib_descs) {
     vertex_descriptors_ = VertexDescriptors{binding_desc, std::move(attrib_descs)};
 
+    return *this;
+}
+
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_primitive_type(
+    VkPrimitiveTopology primitive_type) {
+    primitive_type_ = primitive_type;
     return *this;
 }
 
@@ -78,7 +98,7 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly{};
     input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    input_assembly.topology = primitive_type_;
     input_assembly.primitiveRestartEnable = VK_FALSE;
 
     std::vector<VkDynamicState> dynamic_states
@@ -218,35 +238,6 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
                                               swap_chain_, render_pass_, layout, pipeline);
 }
 
-CommandPool::~CommandPool() { vkDestroyCommandPool(*surface_device_, command_pool, nullptr); }
-
-CommandPool::ptr CommandPool::create(SurfaceDevice::ptr surface_device) {
-    // TODO: allow command pools to be created on different queues
-    VkCommandPoolCreateInfo pool_info{};
-    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    pool_info.queueFamilyIndex = surface_device->queues.graphics.index;
-
-    VkCommandPool pool;
-    helpers::check_vulkan(vkCreateCommandPool(*surface_device, &pool_info, nullptr, &pool));
-
-    return std::make_shared<CommandPool>(PrivateToken{}, surface_device, pool);
-}
-
-CommandBuffer::ptr CommandBuffer::create(SurfaceDevice::ptr surface_device,
-                                         CommandPool::ptr command_pool) {
-    VkCommandBufferAllocateInfo alloc_info{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    alloc_info.commandPool = command_pool->command_pool;
-    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    alloc_info.commandBufferCount = 1;
-
-    VkCommandBuffer buffer;
-    helpers::check_vulkan(vkAllocateCommandBuffers(*surface_device, &alloc_info, &buffer));
-
-    return std::make_shared<CommandBuffer>(PrivateToken{}, surface_device, buffer);
-}
-
 DepthBuffer::~DepthBuffer() {
     vkDestroyImageView(*surface_device_, view, nullptr);
     vkDestroyImage(*surface_device_, image, nullptr);
@@ -318,32 +309,6 @@ SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surf
                                                    depth_buffer);
 }
 
-record_commands::record_commands(CommandBuffer::ptr command_buffer)
-    : command_buffer_(command_buffer) {
-    helpers::check_vulkan(vkResetCommandBuffer(command_buffer->command_buffer, 0));
-
-    VkCommandBufferBeginInfo begin_info{};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin_info.flags = 0;                   // Optional
-    begin_info.pInheritanceInfo = nullptr;  // Optional
-
-    helpers::check_vulkan(vkBeginCommandBuffer(command_buffer->command_buffer, &begin_info));
-}
-
-record_commands::~record_commands() {
-    if (command_buffer_) {
-        helpers::check_vulkan(vkEndCommandBuffer(command_buffer_->command_buffer));
-    }
-}
-
-record_commands::record_commands(record_commands&& other) noexcept { *this = std::move(other); }
-
-record_commands& record_commands::operator=(record_commands&& other) noexcept {
-    std::swap(command_buffer_, other.command_buffer_);
-
-    return *this;
-}
-
 begin_render_pass::begin_render_pass(CommandBuffer::ptr command_buffer, RenderPass::ptr render_pass,
                                      VkFramebuffer framebuffer, VkRect2D area)
     : command_buffer_(command_buffer) {
@@ -381,6 +346,12 @@ begin_render_pass& begin_render_pass::operator=(begin_render_pass&& other) noexc
     return *this;
 }
 
+DefaultRenderSyncObjects::~DefaultRenderSyncObjects() {
+    vkDestroyFence(*surface_device_, in_flight, nullptr);
+    vkDestroySemaphore(*surface_device_, render_finished, nullptr);
+    vkDestroySemaphore(*surface_device_, image_available, nullptr);
+}
+
 DefaultRenderSyncObjects::ptr DefaultRenderSyncObjects::create(vk::SurfaceDevice::ptr device) {
     VkSemaphoreCreateInfo semaphore_info{};
     semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -402,10 +373,29 @@ DefaultRenderSyncObjects::ptr DefaultRenderSyncObjects::create(vk::SurfaceDevice
                                                       render_finished, in_flight);
 }
 
-DefaultRenderSyncObjects::~DefaultRenderSyncObjects() {
-    vkDestroyFence(*surface_device_, in_flight, nullptr);
-    vkDestroySemaphore(*surface_device_, render_finished, nullptr);
-    vkDestroySemaphore(*surface_device_, image_available, nullptr);
+Fence::~Fence() { vkDestroyFence(*surface_device_, fence, nullptr); }
+
+Fence::ptr Fence::create(vk::SurfaceDevice::ptr device) {
+    VkFenceCreateInfo fence_info{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    VkFence fence;
+    helpers::check_vulkan(vkCreateFence(device->device, &fence_info, nullptr, &fence));
+
+    return std::make_shared<Fence>(PrivateToken{}, device, fence);
+}
+
+Semaphore::~Semaphore() { vkDestroySemaphore(*surface_device_, semaphore, nullptr); }
+
+Semaphore::ptr Semaphore::create(vk::SurfaceDevice::ptr device) {
+    VkSemaphoreCreateInfo semaphore_info{};
+    semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    VkSemaphore semaphore;
+    helpers::check_vulkan(vkCreateSemaphore(device->device, &semaphore_info, nullptr, &semaphore));
+
+    return std::make_shared<Semaphore>(PrivateToken{}, device, semaphore);
 }
 
 }  // namespace spor::vk

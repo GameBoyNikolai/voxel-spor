@@ -22,7 +22,7 @@ public:
 public:
     virtual void setup() override;
 
-    virtual vk::CommandBuffer::ptr render(uint32_t framebuffer_index) override;
+    virtual void render(CallSubmitter& submitter, uint32_t framebuffer_index) override;
 
     virtual void teardown() override;
 
@@ -40,9 +40,6 @@ private:
 
     vk::Model::ptr model_;
 
-    //vk::Buffer::ptr vbo_;
-    //vk::Buffer::ptr ibo_;
-
     vk::Buffer::ptr mvp_ubo_;
     std::unique_ptr<vk::PersistentMapping> mvp_mapping_;
 
@@ -57,6 +54,7 @@ private:
     vk::RenderPass::ptr render_pass_;
 
     vk::GraphicsPipeline::ptr graphics_pipeline_;
+    // TODO: move framebuffers out of individual scenes and into the app window state. The Scene can provide a window pass back to the aws object
     vk::SwapChainFramebuffers::ptr framebuffers_;
 };
 

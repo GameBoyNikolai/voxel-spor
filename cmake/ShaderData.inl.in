@@ -1,14 +1,14 @@
 #pragma once
-#include <array>
+#include <vector>
 
 // This file is generated. Do not edit it directly.
 // Edit @SHADER_FILE@ instead, and this file will automatically be regenerated on the next build
 namespace spor {
     namespace shaders {
         namespace @SHADER_NAME@ {
-            constexpr std::array<uint32_t, @SHADER_TOKENS@> @SHADER_TYPE@ {{
+            const std::vector<uint32_t> @SHADER_TYPE@ = {
                 @SHADER_CODE@
-            }};
+            };
         }
     }
 }

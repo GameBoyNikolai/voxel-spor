@@ -150,14 +150,17 @@ SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, std::shared_ptr<Win
     VulkanQueueInfo queue_info;
 
     queue_info.graphics.index = gcomp_index;
+    queue_info.graphics.type = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
     vkGetDeviceQueue(logical_device, queue_info.graphics.index, 0, &queue_info.graphics.queue);
 
     queue_info.present.index = present_index;
+    queue_info.present.type = 0;  // present has no flag :(
     vkGetDeviceQueue(logical_device, queue_info.present.index, 0, &queue_info.present.queue);
 
     if (comp_only_index) {
         auto& comp_queue = queue_info.compute.emplace();
         comp_queue.index = *comp_only_index;
+        comp_queue.type = VK_QUEUE_COMPUTE_BIT;
         vkGetDeviceQueue(logical_device, comp_queue.index, 0, &comp_queue.queue);
     }
 
@@ -261,6 +264,64 @@ SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, 
 
     return std::make_shared<SwapChain>(PrivateToken{}, surface_device, swap_chain,
                                        swap_chain_images, swap_chain_views, format.format, extent);
+}
+
+CommandPool::~CommandPool() { vkDestroyCommandPool(*surface_device_, command_pool, nullptr); }
+
+CommandPool::ptr CommandPool::create(SurfaceDevice::ptr surface_device,
+                                     VulkanQueueInfo::QueueBundle queue) {
+    // TODO: allow command pools to be created on different queues
+    VkCommandPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    pool_info.queueFamilyIndex = queue.index;
+
+    VkCommandPool pool;
+    helpers::check_vulkan(vkCreateCommandPool(*surface_device, &pool_info, nullptr, &pool));
+
+    return std::make_shared<CommandPool>(PrivateToken{}, surface_device, pool);
+}
+
+CommandBuffer::ptr CommandBuffer::create(SurfaceDevice::ptr surface_device,
+                                         CommandPool::ptr command_pool) {
+    VkCommandBufferAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc_info.commandPool = command_pool->command_pool;
+    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info.commandBufferCount = 1;
+
+    VkCommandBuffer buffer;
+    helpers::check_vulkan(vkAllocateCommandBuffers(*surface_device, &alloc_info, &buffer));
+
+    return std::make_shared<CommandBuffer>(PrivateToken{}, surface_device, buffer);
+}
+
+record_commands::record_commands(CommandBuffer::ptr command_buffer, bool reset)
+    : command_buffer_(command_buffer) {
+    if (reset) {
+        helpers::check_vulkan(vkResetCommandBuffer(command_buffer->command_buffer, 0));
+    }
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = 0;                   // Optional
+    begin_info.pInheritanceInfo = nullptr;  // Optional
+
+    helpers::check_vulkan(vkBeginCommandBuffer(command_buffer->command_buffer, &begin_info));
+}
+
+record_commands::~record_commands() {
+    if (command_buffer_) {
+        helpers::check_vulkan(vkEndCommandBuffer(command_buffer_->command_buffer));
+    }
+}
+
+record_commands::record_commands(record_commands&& other) noexcept { *this = std::move(other); }
+
+record_commands& record_commands::operator=(record_commands&& other) noexcept {
+    std::swap(command_buffer_, other.command_buffer_);
+
+    return *this;
 }
 
 }  // namespace spor::vk

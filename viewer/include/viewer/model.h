@@ -4,6 +4,7 @@
 
 #include "viewer/glm_decl.h"
 #include "viewer/vulkan_buffer_objects.h"
+#include "viewer/vulkan_render_objects.h"
 #include "viewer/vulkan_helpers.h"
 
 namespace spor::vk {

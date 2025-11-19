@@ -2,6 +2,8 @@
 
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "viewer/glm_decl.h"
 #include "viewer/vulkan_base_objects.h"
@@ -20,6 +22,32 @@ enum class MouseButton {
     kRight,
 };
 
+class CallSubmitter {
+public:
+    void submit_draw(vk::VulkanQueueInfo::QueueBundle queue, vk::CommandBuffer::ptr cmd_buf);
+    void submit_compute(vk::VulkanQueueInfo::QueueBundle queue, vk::CommandBuffer::ptr cmd_buf);
+
+private:
+    struct Call {
+        enum class Type { kDraw, kCompute };
+
+        Type type;
+        vk::VulkanQueueInfo::QueueBundle queue;
+        vk::CommandBuffer::ptr cmd_buf;
+    };
+
+    std::vector<Call> submissions_;
+
+    bool has_compute_submissions() const;
+
+    using QueuedCalls = std::pair<vk::VulkanQueueInfo::QueueBundle, vk::CommandBuffer::ptr>;
+
+    std::vector<QueuedCalls> get_draw_calls() const;
+    std::vector<QueuedCalls> get_compute_calls() const;
+
+    friend class AppWindowState;
+};
+
 class Scene {
 public:
     virtual ~Scene() = default;
@@ -30,7 +58,7 @@ public:
 
     virtual void setup() = 0;
 
-    virtual vk::CommandBuffer::ptr render(uint32_t framebuffer_index) = 0;
+    virtual void render(CallSubmitter& submitter, uint32_t framebuffer_index) = 0;
 
     virtual void teardown() = 0;
 

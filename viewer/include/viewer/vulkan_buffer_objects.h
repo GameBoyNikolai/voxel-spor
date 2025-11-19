@@ -5,7 +5,6 @@
 
 #include "viewer/vulkan_base_objects.h"
 #include "viewer/vulkan_helpers.h"
-#include "viewer/vulkan_render_objects.h"
 
 namespace spor::vk {
 
@@ -159,6 +158,7 @@ struct DescriptorInfo {
     std::variant<DBuffer, DSampler> object;
 };
 
+// TODO: along with the GraphicsPipeline change, separate this object into parameters of a GP and arguments
 class PipelineDescriptors : public helpers::VulkanObject<PipelineDescriptors> {
 public:
     ~PipelineDescriptors();

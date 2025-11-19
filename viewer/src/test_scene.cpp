@@ -22,7 +22,7 @@ void TestScene::setup() {
     mvp_ubo_ = vk::create_uniform_buffer(surface_device_, 1, sizeof(UniformBufferObject));
     mvp_mapping_ = std::make_unique<vk::PersistentMapping>(mvp_ubo_);
 
-    cmd_pool_ = vk::CommandPool::create(surface_device_);
+    cmd_pool_ = vk::CommandPool::create(surface_device_, surface_device_->queues.graphics);
     cmd_buffer_ = vk::CommandBuffer::create(surface_device_, cmd_pool_);
 
     sampler_ = vk::Sampler::create(surface_device_);
@@ -55,7 +55,7 @@ void TestScene::setup() {
     framebuffers_ = vk::SwapChainFramebuffers::create(surface_device_, swap_chain_, render_pass_);
 }
 
-vk::CommandBuffer::ptr TestScene::render(uint32_t framebuffer_index) {
+void TestScene::render(CallSubmitter& submitter, uint32_t framebuffer_index) {
     update_uniform_buffers();
 
     vk::record_commands rc(cmd_buffer_);
@@ -83,7 +83,7 @@ vk::CommandBuffer::ptr TestScene::render(uint32_t framebuffer_index) {
 
     model_->draw(cmd_buffer_, descriptors_, graphics_pipeline_);
 
-    return cmd_buffer_;
+    submitter.submit_draw(surface_device_->queues.graphics, cmd_buffer_);
 }
 
 void TestScene::teardown() {}

@@ -1,14 +1,19 @@
 #pragma once
 
+#include <array>
+
 #include "viewer/vulkan_buffer_objects.h"
 #include "viewer/vulkan_application.h"
 #include "viewer/vulkan_base_objects.h"
 #include "viewer/vulkan_render_objects.h"
+#include "viewer/vulkan_compute.h"
 #include "viewer/model.h"
 
 namespace spor {
 
 class TestComputeScene : public Scene {
+    static constexpr size_t kNumParticles = 1'000'000;
+
 public:
     TestComputeScene() = default;
     ~TestComputeScene() = default;
@@ -22,38 +27,28 @@ public:
 public:
     virtual void setup() override;
 
-    virtual vk::CommandBuffer::ptr render(uint32_t framebuffer_index) override;
+    virtual void render(CallSubmitter& submitter, uint32_t framebuffer_index) override;
 
     virtual void teardown() override;
 
-public:
-    virtual void on_mouse_drag(MouseButton button, glm::vec2 offset) override;
-
-    virtual void on_mouse_scroll(float offset) override;
+private:
+    vk::CommandBuffer::ptr update_particles();
 
 private:
-    void update_uniform_buffers();
+    vk::CommandPool::ptr gfx_cmd_pool_, cmp_cmd_pool_;
+    vk::CommandBuffer::ptr gfx_cmd_buffer_, cmp_cmd_buffer_;
 
-private:
-    vk::CommandPool::ptr cmd_pool_;
-    vk::CommandBuffer::ptr cmd_buffer_;
+    vk::Buffer::ptr kernel_ubo_;
+    std::unique_ptr<vk::PersistentMapping> kernel_ubo_mapping_;
 
-    vk::Model::ptr model_;
+    std::array<vk::Buffer::ptr, 2> particle_buffers_;
 
-    vk::Buffer::ptr mvp_ubo_;
-    std::unique_ptr<vk::PersistentMapping> mvp_mapping_;
-
-    glm::vec2 orbit_rot_{};
-    float orbit_radius_ = 5.f;
-
-    vk::Sampler::ptr sampler_;
-
-    vk::PipelineDescriptors::ptr descriptors_;
+    vk::Kernel::ptr kernel_;
 
     vk::RenderPass::ptr render_pass_;
+    vk::SwapChainFramebuffers::ptr framebuffers_;
 
     vk::GraphicsPipeline::ptr graphics_pipeline_;
-    vk::SwapChainFramebuffers::ptr framebuffers_;
 };
 
 }  // namespace spor

@@ -51,6 +51,7 @@ struct VulkanQueueInfo {
     struct QueueBundle {
         uint32_t index;
         VkQueue queue;
+        VkQueueFlags type;
     };
 
     QueueBundle graphics;  // compute-enabled graphics queue
@@ -127,6 +128,57 @@ public:
           swap_chain_views(swap_chain_views),
           format(format),
           extent(extent) {}
+};
+
+class CommandPool : public helpers::VulkanObject<CommandPool> {
+public:
+    ~CommandPool();
+
+public:
+    operator VkCommandPool() const { return command_pool; }
+
+    static ptr create(SurfaceDevice::ptr surface_device, VulkanQueueInfo::QueueBundle queue);
+
+public:
+    VkCommandPool command_pool;
+
+private:
+    SurfaceDevice::ptr surface_device_;
+
+public:
+    CommandPool(PrivateToken, SurfaceDevice::ptr surface_device, VkCommandPool pool)
+        : surface_device_(surface_device), command_pool(pool) {}
+};
+
+class CommandBuffer : public helpers::VulkanObject<CommandBuffer> {
+public:
+    operator VkCommandBuffer() const { return command_buffer; }
+
+    static ptr create(SurfaceDevice::ptr surface_device, CommandPool::ptr command_pool);
+
+public:
+    VkCommandBuffer command_buffer;
+
+private:
+    SurfaceDevice::ptr surface_device_;
+
+public:
+    CommandBuffer(PrivateToken, SurfaceDevice::ptr surface_device, VkCommandBuffer buffer)
+        : surface_device_(surface_device), command_buffer(buffer) {}
+};
+
+class record_commands : helpers::NonCopyable {
+public:
+    explicit record_commands(CommandBuffer::ptr command_buffer, bool reset = true);
+
+    ~record_commands();
+
+public:
+    record_commands(record_commands&&) noexcept;
+    record_commands& operator=(record_commands&&) noexcept;
+
+private:
+    CommandBuffer::ptr command_buffer_;
 };
 
 }  // namespace spor::vk

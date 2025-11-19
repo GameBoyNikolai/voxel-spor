@@ -6,10 +6,9 @@
 #include <string>
 #include <vector>
 
+#include "viewer/vulkan_base_objects.h"
 #include "viewer/vulkan_helpers.h"
 #include "vulkan/vulkan.h"
-
-#include "viewer/vulkan_base_objects.h"
 
 namespace spor::vk {
 
@@ -20,10 +19,11 @@ public:
 public:
     operator VkRenderPass() const { return render_pass; };
 
-    static ptr create(SurfaceDevice::ptr device, VkFormat color_format, std::optional<VkFormat> depth_stencil_format);
+    static ptr create(SurfaceDevice::ptr device, VkFormat color_format,
+                      std::optional<VkFormat> depth_stencil_format);
 
     static ptr create(SurfaceDevice::ptr device, SwapChain::ptr swap_chain,
-               std::optional<VkFormat> depth_stencil_format) {
+                      std::optional<VkFormat> depth_stencil_format) {
         return create(device, swap_chain->format, depth_stencil_format);
     }
 
@@ -38,14 +38,14 @@ private:
 
 public:
     RenderPass(PrivateToken, SurfaceDevice::ptr device, VkRenderPass render_pass,
-                     VkFormat color_format, std::optional<VkFormat> depth_stencil_format)
+               VkFormat color_format, std::optional<VkFormat> depth_stencil_format)
         : device_(device),
           render_pass(render_pass),
           color_format(color_format),
           depth_stencil_format(depth_stencil_format) {}
 };
 
-
+// TODO: Separate the descriptor nonsense into parameters and arguments, similar to the kernel
 class GraphicsPipeline : public helpers::VulkanObject<GraphicsPipeline> {
 public:
     ~GraphicsPipeline();
@@ -77,28 +77,21 @@ public:
 
 class GraphicsPipelineBuilder {
 public:
-    GraphicsPipelineBuilder(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain, RenderPass::ptr render_pass)
+    GraphicsPipelineBuilder(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain,
+                            RenderPass::ptr render_pass)
         : surface_device_(surface_device), swap_chain_(swap_chain), render_pass_(render_pass) {}
 
-    template <size_t N>
-    GraphicsPipelineBuilder& add_vertex_shader(const std::array<uint32_t, N>& shader) {
-        add_shader(VK_SHADER_STAGE_VERTEX_BIT, shader.data(), shader.size());
+    GraphicsPipelineBuilder& add_vertex_shader(const std::vector<uint32_t>& shader);
 
-        return *this;
-    }
-
-    template <size_t N>
-    GraphicsPipelineBuilder& add_fragment_shader(const std::array<uint32_t, N>& shader) {
-        add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, shader.data(), shader.size());
-
-        return *this;
-    }
+    GraphicsPipelineBuilder& add_fragment_shader(const std::vector<uint32_t>& shader);
 
     GraphicsPipelineBuilder& set_vertex_descriptors(
         VkVertexInputBindingDescription binding_desc,
         std::vector<VkVertexInputAttributeDescription> attrib_descs);
 
-    GraphicsPipelineBuilder& add_descriptor_set(VkDescriptorSetLayout descriptor_set); 
+    GraphicsPipelineBuilder& set_primitive_type(VkPrimitiveTopology primitive_type);
+
+    GraphicsPipelineBuilder& add_descriptor_set(VkDescriptorSetLayout descriptor_set);
 
     GraphicsPipelineBuilder& enable_depth_testing();
 
@@ -122,46 +115,11 @@ private:
     };
     std::optional<VertexDescriptors> vertex_descriptors_;
 
+    VkPrimitiveTopology primitive_type_ = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
     std::vector<VkDescriptorSetLayout> descriptor_sets_;
 
     bool depth_testing_ = false;
-};
-
-class CommandPool : public helpers::VulkanObject<CommandPool> {
-public:
-    ~CommandPool();
-
-public:
-    operator VkCommandPool() const { return command_pool; }
-
-    static ptr create(SurfaceDevice::ptr surface_device);
-
-public:
-    VkCommandPool command_pool;
-
-private:
-    SurfaceDevice::ptr surface_device_;
-
-public:
-    CommandPool(PrivateToken, SurfaceDevice::ptr surface_device, VkCommandPool pool)
-        : surface_device_(surface_device), command_pool(pool) {}
-};
-
-class CommandBuffer : public helpers::VulkanObject<CommandBuffer> {
-public:
-    operator VkCommandBuffer() const { return command_buffer; }
-
-    static ptr create(SurfaceDevice::ptr surface_device, CommandPool::ptr command_pool);
-
-public:
-    VkCommandBuffer command_buffer;
-
-private:
-    SurfaceDevice::ptr surface_device_;
-
-public:
-    CommandBuffer(PrivateToken, SurfaceDevice::ptr surface_device, VkCommandBuffer buffer)
-        : surface_device_(surface_device), command_buffer(buffer) {}
 };
 
 class DepthBuffer : public helpers::VulkanObject<DepthBuffer> {
@@ -171,7 +129,8 @@ public:
 public:
     static VkFormat default_format(SurfaceDevice::ptr surface_device);
 
-    static ptr create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain, VkFormat format);
+    static ptr create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain,
+                      VkFormat format);
 
     static ptr create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain);
 
@@ -222,24 +181,10 @@ public:
           depth_buffer(depth_buffer) {}
 };
 
-class record_commands : helpers::NonCopyable {
-public:
-    explicit record_commands(CommandBuffer::ptr command_buffer);
-
-    ~record_commands();
-
-public:
-    record_commands(record_commands&&) noexcept;
-    record_commands& operator=(record_commands&&) noexcept;
-
-private:
-    CommandBuffer::ptr command_buffer_;
-};
-
 class begin_render_pass : helpers::NonCopyable {
 public:
     explicit begin_render_pass(CommandBuffer::ptr command_buffer, RenderPass::ptr render_pass,
-                         VkFramebuffer framebuffer, VkRect2D area);
+                               VkFramebuffer framebuffer, VkRect2D area);
 
     ~begin_render_pass();
 
@@ -251,7 +196,47 @@ private:
     CommandBuffer::ptr command_buffer_;
 };
 
-struct DefaultRenderSyncObjects : public helpers::VulkanObject<DefaultRenderSyncObjects> {
+class Fence : public helpers::VulkanObject<Fence> {
+public:
+    ~Fence();
+
+public:
+    static ptr create(vk::SurfaceDevice::ptr device);
+
+    operator VkFence() { return fence; }
+
+public:
+    VkFence fence;
+
+private:
+    vk::SurfaceDevice::ptr surface_device_;
+
+public:
+    Fence(PrivateToken, vk::SurfaceDevice::ptr device, VkFence fence)
+        : surface_device_(device), fence(fence) {}
+};
+
+class Semaphore : public helpers::VulkanObject<Semaphore> {
+public:
+    ~Semaphore();
+
+public:
+    static ptr create(vk::SurfaceDevice::ptr device);
+
+    operator VkSemaphore() { return semaphore; }
+
+public:
+    VkSemaphore semaphore;
+
+private:
+    vk::SurfaceDevice::ptr surface_device_;
+
+public:
+    Semaphore(PrivateToken, vk::SurfaceDevice::ptr device, VkSemaphore semaphore)
+        : surface_device_(device), semaphore(semaphore) {}
+};
+
+class DefaultRenderSyncObjects : public helpers::VulkanObject<DefaultRenderSyncObjects> {
 public:
     ~DefaultRenderSyncObjects();
 
