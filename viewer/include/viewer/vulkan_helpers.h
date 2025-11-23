@@ -82,6 +82,13 @@ struct VulkanDeviceCapabilities {
     bool valid(const std::set<std::string>& required_extensions);
 };
 
+struct ImageView {
+    VkImage image;
+    VkImageView view;
+
+    size_t w, h;
+};
+
 void check_vulkan(VkResult result);
 
 VulkanDeviceCapabilities get_full_device_capabilities(VkPhysicalDevice device,

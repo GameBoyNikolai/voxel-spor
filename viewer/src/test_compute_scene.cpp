@@ -14,7 +14,6 @@
 
 namespace spor {
 
-namespace {
 struct KernelUBO {
     float dt = 0.f;
     uint32_t num_particles = 0;
@@ -50,19 +49,13 @@ struct Particle {
         return descs;
     }
 };
-}  // namespace
 
 void TestComputeScene::setup() {
-    // mvp_ubo_ = vk::create_uniform_buffer(surface_device_, 1, sizeof(UniformBufferObject));
-    // mvp_mapping_ = std::make_unique<vk::PersistentMapping>(mvp_ubo_);
-
     gfx_cmd_pool_ = vk::CommandPool::create(surface_device_, surface_device_->queues.graphics);
     cmp_cmd_pool_ = vk::CommandPool::create(surface_device_, surface_device_->queues.graphics);
-    gfx_cmd_buffer_ = vk::CommandBuffer::create(surface_device_, gfx_cmd_pool_);
-    cmp_cmd_buffer_ = vk::CommandBuffer::create(surface_device_, cmp_cmd_pool_);
 
     kernel_ubo_ = vk::create_uniform_buffer(surface_device_, 1, sizeof(KernelUBO));
-    kernel_ubo_mapping_ = std::make_unique<vk::PersistentMapping>(kernel_ubo_);
+    kernel_ubo_mapping_ = std::make_unique<vk::PersistentMapping<KernelUBO>>(kernel_ubo_);
 
     particle_buffers_ = {{
         vk::create_storage_buffer(surface_device_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, kNumParticles,
@@ -78,7 +71,7 @@ void TestComputeScene::setup() {
         for (size_t i = 0; i < kNumParticles; ++i) {
             auto& particle = particle_init_data[i];
 
-            float r = 0.25f * std::sqrt(dist(eng));
+            float r = 0.1f * std::sqrt(dist(eng));
             float theta = dist(eng) * 2.0f * glm::pi<float>();
             float x = r * std::cos(theta) * static_cast<float>(swap_chain_->extent.height) / swap_chain_->extent.width;
             float y = r * std::sin(theta);
@@ -117,13 +110,14 @@ void TestComputeScene::setup() {
 void TestComputeScene::render(CallSubmitter& submitter, uint32_t framebuffer_index) {
     submitter.submit_compute(surface_device_->queues.graphics, update_particles());
 
-    vk::record_commands rc(gfx_cmd_buffer_);
+    auto gfx_cmds = gfx_cmd_pool_->primary_buffer(true);
+    vk::record_commands rc(gfx_cmds);
 
     VkRect2D view_rect{{0, 0}, swap_chain_->extent};
-    vk::begin_render_pass rp(gfx_cmd_buffer_, render_pass_,
+    vk::begin_render_pass rp(gfx_cmds, render_pass_,
                              framebuffers_->framebuffers[framebuffer_index], view_rect);
 
-    vkCmdBindPipeline(*gfx_cmd_buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS,
+    vkCmdBindPipeline(*gfx_cmds, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       graphics_pipeline_->graphics_pipeline);
 
     VkViewport viewport{};
@@ -133,40 +127,37 @@ void TestComputeScene::render(CallSubmitter& submitter, uint32_t framebuffer_ind
     viewport.height = static_cast<float>(view_rect.extent.height);
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(*gfx_cmd_buffer_, 0, 1, &viewport);
+    vkCmdSetViewport(*gfx_cmds, 0, 1, &viewport);
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
     scissor.extent = swap_chain_->extent;
-    vkCmdSetScissor(*gfx_cmd_buffer_, 0, 1, &scissor);
+    vkCmdSetScissor(*gfx_cmds, 0, 1, &scissor);
 
     VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(*gfx_cmd_buffer_, 0, 1, &particle_buffers_[0]->buffer, offsets);
+    vkCmdBindVertexBuffers(*gfx_cmds, 0, 1, &particle_buffers_[0]->buffer, offsets);
 
-    vkCmdDraw(*gfx_cmd_buffer_, kNumParticles, 1, 0, 0);
+    vkCmdDraw(*gfx_cmds, kNumParticles, 1, 0, 0);
 
-    submitter.submit_draw(surface_device_->queues.graphics, gfx_cmd_buffer_);
+    submitter.submit_draw(surface_device_->queues.graphics, gfx_cmds);
 }
 
 void TestComputeScene::teardown() {}
 
 vk::CommandBuffer::ptr TestComputeScene::update_particles() {
-    // slightly prettier to me than a memcpy?
-    // TODO: perhaps make PersistentMapping a template type
-    *reinterpret_cast<KernelUBO*>(kernel_ubo_mapping_->mapped_mem)
-        = {0.01666f, static_cast<uint32_t>(kNumParticles)};
+    (*kernel_ubo_mapping_)[0] = {0.01666f, static_cast<uint32_t>(kNumParticles)};
 
     // swap in and out buffers
     std::swap(particle_buffers_[0], particle_buffers_[1]);
 
-    vk::helpers::check_vulkan(vkResetCommandBuffer(*cmp_cmd_buffer_, 0));
+    auto cmp_cmds = cmp_cmd_pool_->primary_buffer(true);
     vk::Invoker(kernel_)                  //
         .with_ubo(kernel_ubo_)            //
         .with_ssbo(particle_buffers_[0])  //
         .with_ssbo(particle_buffers_[1])  //
-        .invoke(cmp_cmd_buffer_, kNumParticles / 1024 + (kNumParticles % 1024 > 0 ? 1 : 0));
+        .invoke(cmp_cmds, kNumParticles / 1024 + (kNumParticles % 1024 > 0 ? 1 : 0));
 
-    return cmp_cmd_buffer_;
+    return cmp_cmds;
 }
 
 }  // namespace spor

@@ -1,12 +1,15 @@
 #pragma once
 
+#include <list>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "viewer/glm_decl.h"
 #include "viewer/vulkan_base_objects.h"
+#include "viewer/vulkan_buffer_objects.h"
 #include "viewer/vulkan_helpers.h"
 #include "vulkan/vulkan.h"
 
@@ -45,6 +48,114 @@ public:
           depth_stencil_format(depth_stencil_format) {}
 };
 
+struct DescriptorSet {
+public:
+    VkDescriptorSet descriptor_set;
+
+public:
+    operator VkDescriptorSet() const { return descriptor_set; }
+};
+
+class DescriptorUpdater : public helpers::NonCopyable {
+public:
+    DescriptorUpdater(SurfaceDevice::ptr device);
+    ~DescriptorUpdater() = default;
+
+    DescriptorUpdater(DescriptorUpdater&&) noexcept = default;
+    DescriptorUpdater& operator=(DescriptorUpdater&&) noexcept = default;
+
+public:
+    DescriptorUpdater& with_ubo(uint32_t binding, Buffer::ptr buffer,
+                                std::optional<size_t> offset = std::nullopt,
+                                std::optional<size_t> size = std::nullopt);
+    DescriptorUpdater& with_ssbo(uint32_t binding, Buffer::ptr buffer,
+                                 std::optional<size_t> offset = std::nullopt,
+                                 std::optional<size_t> size = std::nullopt);
+    DescriptorUpdater& with_sampled_image(uint32_t binding, Texture::ptr texture,
+                                          vk::Sampler::ptr sampler,
+                                          std::optional<VkImageLayout> layout = std::nullopt);
+    DescriptorUpdater& with_storage_image(uint32_t binding, Texture::ptr texture,
+                                          std::optional<VkImageLayout> layout = std::nullopt);
+
+    void update(VkDescriptorSet desc);
+
+private:
+    VkWriteDescriptorSet& add_write(VkDescriptorType type);
+
+    SurfaceDevice::ptr device_;
+
+    // lists allow us to safely keep pointers to the elements
+    std::list<VkDescriptorImageInfo> image_infos_;
+    std::list<VkDescriptorBufferInfo> buffer_infos_;
+    std::vector<VkWriteDescriptorSet> writes_;
+};
+
+struct DescParameter {
+    enum ParamType {
+        kUBO,
+        kSSBO,
+        kSampledImage,
+        kStorageImage,
+    };
+
+    uint32_t binding;
+    ParamType type;
+    VkShaderStageFlags shader_stages;
+};
+
+class DescriptorLayout : public helpers::VulkanObject<DescriptorLayout> {
+public:
+    ~DescriptorLayout();
+
+    operator VkDescriptorSetLayout() const { return layout; }
+
+public:
+    static ptr create(SurfaceDevice::ptr device, const std::vector<DescParameter>& params);
+
+public:
+    VkDescriptorSetLayout layout;
+
+private:
+    SurfaceDevice::ptr device_;
+
+public:
+    DescriptorLayout(PrivateToken, SurfaceDevice::ptr device, VkDescriptorSetLayout layout)
+        : device_(device), layout(layout) {}
+};
+
+class DescriptorAllocator : public helpers::NonCopyable {
+public:
+    struct PoolSizeRatio {
+        VkDescriptorType type;
+        float ratio;
+    };
+
+public:
+    DescriptorAllocator(SurfaceDevice::ptr device, size_t set_size,
+                        std::vector<PoolSizeRatio> ratios);
+    ~DescriptorAllocator();
+
+    DescriptorAllocator(DescriptorAllocator&&) noexcept;
+    DescriptorAllocator& operator=(DescriptorAllocator&&) noexcept;
+
+public:
+    DescriptorSet allocate(VkDescriptorSetLayout layout);
+
+    void clear();
+
+private:
+    VkDescriptorPool next_pool();
+
+private:
+    SurfaceDevice::ptr device_;
+
+    std::vector<PoolSizeRatio> ratios_;
+    size_t set_size_{};
+
+    std::vector<VkDescriptorPool> full_pools_;
+    std::vector<VkDescriptorPool> active_pools_;
+};
+
 // TODO: Separate the descriptor nonsense into parameters and arguments, similar to the kernel
 class GraphicsPipeline : public helpers::VulkanObject<GraphicsPipeline> {
 public:
@@ -59,6 +170,8 @@ public:
     VkPipelineLayout pipeline_layout;
     VkPipeline graphics_pipeline;
 
+    std::vector<DescriptorLayout::ptr> descriptor_layouts;
+
 private:
     SurfaceDevice::ptr surface_device_;
     SwapChain::ptr swap_chain_;
@@ -67,12 +180,14 @@ private:
 public:
     GraphicsPipeline(PrivateToken, SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain,
                      RenderPass::ptr render_pass, VkPipelineLayout pipeline_layout,
-                     VkPipeline graphics_pipeline)
+                     VkPipeline graphics_pipeline,
+                     std::vector<DescriptorLayout::ptr> descriptor_layouts)
         : surface_device_(surface_device),
           swap_chain_(swap_chain),
           render_pass_(render_pass),
           pipeline_layout(pipeline_layout),
-          graphics_pipeline(graphics_pipeline) {}
+          graphics_pipeline(graphics_pipeline),
+          descriptor_layouts(std::move(descriptor_layouts)) {}
 };
 
 class GraphicsPipelineBuilder {
@@ -91,7 +206,9 @@ public:
 
     GraphicsPipelineBuilder& set_primitive_type(VkPrimitiveTopology primitive_type);
 
-    GraphicsPipelineBuilder& add_descriptor_set(VkDescriptorSetLayout descriptor_set);
+    GraphicsPipelineBuilder& add_global_layout(DescriptorLayout::ptr layout);
+
+    GraphicsPipelineBuilder& add_local_layout(const std::vector<DescParameter>& params);
 
     GraphicsPipelineBuilder& enable_depth_testing();
 
@@ -117,7 +234,7 @@ private:
 
     VkPrimitiveTopology primitive_type_ = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    std::vector<VkDescriptorSetLayout> descriptor_sets_;
+    std::vector<DescriptorLayout::ptr> descriptor_layouts_;
 
     bool depth_testing_ = false;
 };
@@ -133,6 +250,12 @@ public:
                       VkFormat format);
 
     static ptr create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain);
+
+public:
+    helpers::ImageView image_view() {
+        return helpers::ImageView{image, view, swap_chain_->extent.width,
+                                  swap_chain_->extent.height};
+    }
 
 public:
     VkImage image;
@@ -191,6 +314,23 @@ public:
 public:
     begin_render_pass(begin_render_pass&&) noexcept;
     begin_render_pass& operator=(begin_render_pass&&) noexcept;
+
+private:
+    CommandBuffer::ptr command_buffer_;
+};
+
+struct start_rendering : helpers::NonCopyable {
+public:
+    explicit start_rendering(CommandBuffer::ptr command_buffer, VkRect2D area,
+                             const helpers::ImageView& color_attachment,
+                             const helpers::ImageView& depth_attachment,
+                             const glm::vec4& clear_color = glm::vec4(0.0));
+
+    ~start_rendering();
+
+public:
+    start_rendering(start_rendering&&) noexcept;
+    start_rendering& operator=(start_rendering&&) noexcept;
 
 private:
     CommandBuffer::ptr command_buffer_;

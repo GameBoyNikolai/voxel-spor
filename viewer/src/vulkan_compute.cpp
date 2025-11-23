@@ -206,7 +206,7 @@ void Invoker::invoke(CommandBuffer::ptr cmd_buffer, glm::u64vec3 grid_size) {
 
     // invoke the kernel on this command buffer
 
-    auto rc = record_commands(cmd_buffer, false);
+    auto rc = record_commands(cmd_buffer);
 
     vkCmdBindPipeline(*cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, *kernel_);
     vkCmdBindDescriptorSets(*cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, kernel_->pipeline_layout, 0, 1, &kernel_->descriptor_set_, 0, 0);

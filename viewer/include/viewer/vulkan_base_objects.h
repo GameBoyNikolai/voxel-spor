@@ -108,6 +108,9 @@ public:
     static ptr create(SurfaceDevice::ptr surface_device, uint32_t w, uint32_t h);
 
 public:
+    helpers::ImageView image_view(size_t index);
+
+public:
     VkSwapchainKHR swap_chain;
     std::vector<VkImage> images;
     std::vector<VkImageView> swap_chain_views;
@@ -130,6 +133,8 @@ public:
           extent(extent) {}
 };
 
+class CommandBuffer;
+
 class CommandPool : public helpers::VulkanObject<CommandPool> {
 public:
     ~CommandPool();
@@ -140,10 +145,15 @@ public:
     static ptr create(SurfaceDevice::ptr surface_device, VulkanQueueInfo::QueueBundle queue);
 
 public:
+    std::shared_ptr<CommandBuffer> primary_buffer(bool reset_on_fetch = false);
+
+public:
     VkCommandPool command_pool;
 
 private:
     SurfaceDevice::ptr surface_device_;
+
+    std::shared_ptr<CommandBuffer> primary_buffer_{nullptr};
 
 public:
     CommandPool(PrivateToken, SurfaceDevice::ptr surface_device, VkCommandPool pool)
@@ -169,7 +179,7 @@ public:
 
 class record_commands : helpers::NonCopyable {
 public:
-    explicit record_commands(CommandBuffer::ptr command_buffer, bool reset = true);
+    explicit record_commands(CommandBuffer::ptr command_buffer);
 
     ~record_commands();
 
@@ -180,5 +190,11 @@ public:
 private:
     CommandBuffer::ptr command_buffer_;
 };
+
+void transition_image(CommandBuffer::ptr cmd, const helpers::ImageView& image, VkImageLayout from,
+                      VkImageLayout to);
+
+void blit_image(CommandBuffer::ptr cmd, const helpers::ImageView& src,
+                const helpers::ImageView& dst);
 
 }  // namespace spor::vk

@@ -138,28 +138,6 @@ void submit_commands(CommandBuffer::ptr cmd_buffer, VkQueue queue, bool block) {
     }
 }
 
-PersistentMapping::PersistentMapping(Buffer::ptr buffer) : buffer(buffer) {
-    helpers::check_vulkan(
-        vkMapMemory(*buffer->surface_device_, buffer->memory, 0, buffer->size(), 0, &mapped_mem));
-}
-
-PersistentMapping::~PersistentMapping() {
-    if (buffer && mapped_mem) {
-        vkUnmapMemory(*buffer->surface_device_, buffer->memory);
-    }
-}
-
-PersistentMapping::PersistentMapping(PersistentMapping&& other) noexcept {
-    *this = std::move(other);
-}
-
-PersistentMapping& PersistentMapping::operator=(PersistentMapping&& other) noexcept {
-    std::swap(buffer, other.buffer);
-    std::swap(mapped_mem, other.mapped_mem);
-
-    return *this;
-}
-
 Texture::~Texture() {
     vkDestroyImageView(*surface_device_, view, nullptr);
     vkDestroyImage(*surface_device_, image, nullptr);

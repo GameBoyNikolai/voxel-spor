@@ -168,11 +168,11 @@ std::vector<VkVertexInputAttributeDescription> Model::vertex_attribute_descripti
     return ModelVertex::attribute_descriptions();
 }
 
-void Model::draw(CommandBuffer::ptr cmd_buffer, PipelineDescriptors::ptr descriptors,
+void Model::draw(CommandBuffer::ptr cmd_buffer, DescriptorSet descriptors,
                  GraphicsPipeline::ptr pipeline) {
     vkCmdBindDescriptorSets(cmd_buffer->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipeline->pipeline_layout, 0, 1,
-                            &descriptors->descriptor_set, 0, nullptr);
+                            pipeline->pipeline_layout, 1, 1,
+                            &descriptors.descriptor_set, 0, nullptr);
 
     VkBuffer vertex_buffers[] = {vbo_->buffer};
     VkDeviceSize offsets[] = {0};

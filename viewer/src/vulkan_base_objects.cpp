@@ -128,8 +128,15 @@ SurfaceDevice::ptr SurfaceDevice::create(Instance::ptr inst, std::shared_ptr<Win
 
     VkPhysicalDeviceFeatures features{};
 
+    VkPhysicalDeviceVulkan13Features features_13{};
+    features_13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    features_13.pNext = nullptr;
+    features_13.synchronization2 = VK_TRUE;
+    features_13.dynamicRendering = VK_TRUE;
+
     VkDeviceCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    create_info.pNext = &features_13;
     create_info.pQueueCreateInfos = queue_create_infos.data();
     create_info.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size());
 
@@ -266,6 +273,14 @@ SwapChain::ptr SwapChain::create(SurfaceDevice::ptr surface_device, uint32_t w, 
                                        swap_chain_images, swap_chain_views, format.format, extent);
 }
 
+helpers::ImageView SwapChain::image_view(size_t index) {
+    if (index >= images.size()) {
+        throw std::out_of_range("Swap Chain frame index out of range");
+    }
+
+    return helpers::ImageView{images[index], swap_chain_views[index], extent.width, extent.height};
+}
+
 CommandPool::~CommandPool() { vkDestroyCommandPool(*surface_device_, command_pool, nullptr); }
 
 CommandPool::ptr CommandPool::create(SurfaceDevice::ptr surface_device,
@@ -282,6 +297,18 @@ CommandPool::ptr CommandPool::create(SurfaceDevice::ptr surface_device,
     return std::make_shared<CommandPool>(PrivateToken{}, surface_device, pool);
 }
 
+CommandBuffer::ptr CommandPool::primary_buffer(bool reset_on_fetch) {
+    if (!primary_buffer_) {
+        primary_buffer_ = CommandBuffer::create(surface_device_, shared_from_this());
+    }
+
+    if (reset_on_fetch) {
+        helpers::check_vulkan(vkResetCommandBuffer(*primary_buffer_, 0));
+    }
+
+    return primary_buffer_;
+}
+
 CommandBuffer::ptr CommandBuffer::create(SurfaceDevice::ptr surface_device,
                                          CommandPool::ptr command_pool) {
     VkCommandBufferAllocateInfo alloc_info{};
@@ -296,12 +323,8 @@ CommandBuffer::ptr CommandBuffer::create(SurfaceDevice::ptr surface_device,
     return std::make_shared<CommandBuffer>(PrivateToken{}, surface_device, buffer);
 }
 
-record_commands::record_commands(CommandBuffer::ptr command_buffer, bool reset)
+record_commands::record_commands(CommandBuffer::ptr command_buffer)
     : command_buffer_(command_buffer) {
-    if (reset) {
-        helpers::check_vulkan(vkResetCommandBuffer(command_buffer->command_buffer, 0));
-    }
-
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = 0;                   // Optional
@@ -322,6 +345,78 @@ record_commands& record_commands::operator=(record_commands&& other) noexcept {
     std::swap(command_buffer_, other.command_buffer_);
 
     return *this;
+}
+
+void transition_image(CommandBuffer::ptr cmd, const helpers::ImageView& image, VkImageLayout from,
+                      VkImageLayout to) {
+    VkImageMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.pNext = nullptr;
+
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
+
+    barrier.oldLayout = from;
+    barrier.newLayout = to;
+
+    VkImageAspectFlags aspect_mask = (to == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL)
+                                        ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                        : VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask = aspect_mask;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    barrier.image = image.image;
+
+    VkDependencyInfo depInfo{};
+    depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depInfo.pNext = nullptr;
+
+    depInfo.imageMemoryBarrierCount = 1;
+    depInfo.pImageMemoryBarriers = &barrier;
+
+    vkCmdPipelineBarrier2(*cmd, &depInfo);
+}
+
+void blit_image(CommandBuffer::ptr cmd, const helpers::ImageView& src,
+                const helpers::ImageView& dst) {
+    VkImageBlit2 blit_config{};
+    blit_config.sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2;
+    blit_config.pNext = nullptr;
+
+    blit_config.srcOffsets[1].x = static_cast<int32_t>(src.w);
+    blit_config.srcOffsets[1].y = static_cast<int32_t>(src.h);
+    blit_config.srcOffsets[1].z = 1;
+
+    blit_config.dstOffsets[1].x = static_cast<int32_t>(dst.w);
+    blit_config.dstOffsets[1].y = static_cast<int32_t>(dst.h);
+    blit_config.dstOffsets[1].z = 1;
+
+    blit_config.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    blit_config.srcSubresource.baseArrayLayer = 0;
+    blit_config.srcSubresource.layerCount = 1;
+    blit_config.srcSubresource.mipLevel = 0;
+
+    blit_config.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    blit_config.dstSubresource.baseArrayLayer = 0;
+    blit_config.dstSubresource.layerCount = 1;
+    blit_config.dstSubresource.mipLevel = 0;
+
+    VkBlitImageInfo2 blit_info{};
+    blit_info.sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2, blit_info.pNext = nullptr;
+    blit_info.dstImage = dst.image;
+    blit_info.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    blit_info.srcImage = src.image;
+    blit_info.srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    blit_info.filter = VK_FILTER_LINEAR;
+    blit_info.regionCount = 1;
+    blit_info.pRegions = &blit_config;
+
+    vkCmdBlitImage2(*cmd, &blit_info);
 }
 
 }  // namespace spor::vk

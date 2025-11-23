@@ -31,7 +31,7 @@ public:
     size_t element_size;
 
 private:
-    friend class PersistentMapping;  // to access device easily
+    template <typename T> friend class PersistentMapping;  // to access device easily
 
     SurfaceDevice::ptr surface_device_;
 
@@ -54,9 +54,8 @@ Buffer::ptr create_index_buffer(SurfaceDevice::ptr surface_device, size_t elemen
 Buffer::ptr create_uniform_buffer(SurfaceDevice::ptr surface_device, size_t element_count,
                                   size_t element_size);
 
-Buffer::ptr create_storage_buffer(SurfaceDevice::ptr surface_device,
-                                  VkBufferUsageFlags aliasing, size_t element_count,
-                                  size_t element_size);
+Buffer::ptr create_storage_buffer(SurfaceDevice::ptr surface_device, VkBufferUsageFlags aliasing,
+                                  size_t element_count, size_t element_size);
 
 template <typename T> Buffer::ptr create_and_fill_transfer_buffer(SurfaceDevice::ptr surface_device,
                                                                   const std::vector<T>& data) {
@@ -75,16 +74,41 @@ CommandBuffer::ptr buffer_memcpy(SurfaceDevice::ptr device, CommandPool::ptr poo
 
 void submit_commands(CommandBuffer::ptr cmd_buffer, VkQueue queue, bool block = true);
 
-class PersistentMapping : public helpers::NonCopyable {
+template <typename T> class PersistentMapping : public helpers::NonCopyable {
 public:
-    PersistentMapping(Buffer::ptr buffer);
-    ~PersistentMapping();
+    PersistentMapping(Buffer::ptr buffer) : buffer(buffer) {
+        helpers::check_vulkan(vkMapMemory(*buffer->surface_device_, buffer->memory, 0,
+                                          buffer->size(), 0,
+                                          reinterpret_cast<void**>(&mapped_mem)));
+    }
 
-    PersistentMapping(PersistentMapping&&) noexcept;
-    PersistentMapping& operator=(PersistentMapping&&) noexcept;
+    ~PersistentMapping() {
+        if (buffer && mapped_mem) {
+            vkUnmapMemory(*buffer->surface_device_, buffer->memory);
+        }
+    }
 
+    PersistentMapping(PersistentMapping&& other) noexcept { *this = std::move(other); }
+
+    PersistentMapping& operator=(PersistentMapping&& other) noexcept {
+        std::swap(buffer, other.buffer);
+        std::swap(mapped_mem, other.mapped_mem);
+
+        return *this;
+    }
+
+public:
+    T& operator[](size_t i) {
+        if (i >= buffer->element_count) {
+            throw std::out_of_range("Mapped memory index out of bounds");
+        }
+
+        return mapped_mem[i];
+    }
+
+public:
     Buffer::ptr buffer;
-    void* mapped_mem{nullptr};
+    T* mapped_mem{nullptr};
 };
 
 class Texture : public helpers::VulkanObject<Texture> {
@@ -93,6 +117,8 @@ public:
 
 public:
     static ptr create(SurfaceDevice::ptr surface_device, size_t width, size_t height);
+
+    helpers::ImageView image_view() { return helpers::ImageView{image, view, width, height}; }
 
 public:
     VkImage image;
@@ -126,7 +152,9 @@ class Sampler : public helpers::VulkanObject<Sampler> {
 public:
     ~Sampler();
 
-public:
+    operator VkSampler() const { return sampler; }
+
+public: 
     static ptr create(SurfaceDevice::ptr surface_device, VkFilter filter = VK_FILTER_LINEAR,
                       VkSamplerAddressMode address_mode = VK_SAMPLER_ADDRESS_MODE_REPEAT);
 
@@ -158,7 +186,8 @@ struct DescriptorInfo {
     std::variant<DBuffer, DSampler> object;
 };
 
-// TODO: along with the GraphicsPipeline change, separate this object into parameters of a GP and arguments
+// TODO: along with the GraphicsPipeline change, separate this object into parameters of a GP and
+// arguments
 class PipelineDescriptors : public helpers::VulkanObject<PipelineDescriptors> {
 public:
     ~PipelineDescriptors();

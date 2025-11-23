@@ -11,6 +11,8 @@
 
 namespace spor {
 
+class KernelUBO;
+
 class TestComputeScene : public Scene {
     static constexpr size_t kNumParticles = 1'000'000;
 
@@ -36,10 +38,9 @@ private:
 
 private:
     vk::CommandPool::ptr gfx_cmd_pool_, cmp_cmd_pool_;
-    vk::CommandBuffer::ptr gfx_cmd_buffer_, cmp_cmd_buffer_;
 
     vk::Buffer::ptr kernel_ubo_;
-    std::unique_ptr<vk::PersistentMapping> kernel_ubo_mapping_;
+    std::unique_ptr<vk::PersistentMapping<KernelUBO>> kernel_ubo_mapping_;
 
     std::array<vk::Buffer::ptr, 2> particle_buffers_;
 

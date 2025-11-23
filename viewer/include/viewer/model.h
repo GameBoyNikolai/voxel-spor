@@ -21,7 +21,7 @@ public:
 
     Texture::ptr texture() { return texture_; }
 
-    void draw(CommandBuffer::ptr cmd_buffer, PipelineDescriptors::ptr descriptors,
+    void draw(CommandBuffer::ptr cmd_buffer, DescriptorSet descriptors,
               GraphicsPipeline::ptr pipeline);
 
 public:

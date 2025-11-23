@@ -48,6 +48,9 @@ public:
         SDL_GetWindowSizeInPixels(*window_, &pixel_w, &pixel_h);
         swap_chain_ = vk::SwapChain::create(device_, static_cast<uint32_t>(pixel_w),
                                             static_cast<uint32_t>(pixel_h));
+
+        base_title_ = SDL_GetWindowTitle(*window_);
+        time_ = static_cast<double>(SDL_GetPerformanceCounter()) / SDL_GetPerformanceFrequency();
     }
 
     ~AppWindowState() {
@@ -59,11 +62,6 @@ public:
 
 public:
     void draw() {
-        if (true) {
-            //vkWaitForFences(*device_, 1, &compute_in_flight_->fence, VK_TRUE, UINT64_MAX);
-            //vkResetFences(*device_, 1, &compute_in_flight_->fence);
-        }
-
         // resize swap chain?
 
         vkWaitForFences(device_->device, 1, &sync_objects_->in_flight, VK_TRUE,
@@ -74,6 +72,12 @@ public:
         vkAcquireNextImageKHR(device_->device, swap_chain_->swap_chain,
                               std::numeric_limits<uint64_t>::max(), sync_objects_->image_available,
                               VK_NULL_HANDLE, &image_index);
+
+        if (compute_call_last_frame_) {
+            vkWaitForFences(*device_, 1, &compute_in_flight_->fence, VK_TRUE,
+                            std::numeric_limits<uint64_t>::max());
+            vkResetFences(*device_, 1, &compute_in_flight_->fence);
+        }
 
         CallSubmitter submitter;
         scene_->render(submitter, image_index);
@@ -138,6 +142,12 @@ public:
         vkQueuePresentKHR(device_->queues.present.queue, &present_info);
 
         compute_call_last_frame_ = has_compute_call;
+
+        double current_time = static_cast<double>(SDL_GetPerformanceCounter()) / SDL_GetPerformanceFrequency();
+        std::string new_title = base_title_ + " | " + std::to_string(1.0 / (current_time - time_));
+        SDL_SetWindowTitle(*window_, new_title.data());
+
+        time_ = current_time;
     }
 
 public:
@@ -205,6 +215,9 @@ private:
     std::unique_ptr<Scene> scene_{nullptr};
 
     std::unordered_map<MouseButton, glm::vec2> last_mouse_pos_;
+
+    std::string base_title_ = "";
+    double time_ = 0.f;
 };
 
 Window::Window(AppWindowState* state) : state_(state) {}

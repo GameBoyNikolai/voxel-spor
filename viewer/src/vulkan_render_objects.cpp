@@ -2,8 +2,27 @@
 
 #include <algorithm>
 #include <array>
+#include <stdexcept>
+#include <iterator>
 
 namespace spor::vk {
+
+namespace {
+VkDescriptorType to_desc_type(DescParameter::ParamType type) {
+    switch (type) {
+        case DescParameter::ParamType::kUBO:
+            return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        case DescParameter::ParamType::kSSBO:
+            return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        case DescParameter::ParamType::kSampledImage:
+            return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        case DescParameter::ParamType::kStorageImage:
+            return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    }
+
+    throw std::invalid_argument("Invalid DescParameter ParamType");
+}
+}  // namespace
 
 RenderPass::~RenderPass() { vkDestroyRenderPass(*device_, render_pass, nullptr); }
 
@@ -68,9 +87,16 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_primitive_type(
     return *this;
 }
 
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_descriptor_set(
-    VkDescriptorSetLayout descriptor_set) {
-    descriptor_sets_.push_back(descriptor_set);
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_global_layout(DescriptorLayout::ptr layout) {
+    descriptor_layouts_.push_back(layout);
+
+    return *this;
+}
+
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_local_layout(
+    const std::vector<DescParameter>& params) {
+    descriptor_layouts_.push_back(DescriptorLayout::create(surface_device_, params));
+
     return *this;
 }
 
@@ -187,11 +213,16 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
         depth_stencil.back = {};   // Optional
     }
 
+    std::vector<VkDescriptorSetLayout> set_layouts;
+    set_layouts.reserve(descriptor_layouts_.size());
+    std::transform(descriptor_layouts_.begin(), descriptor_layouts_.end(),
+                   std::back_inserter(set_layouts), [](const auto& layout) { return layout->layout; });
+
     VkPipelineLayoutCreateInfo pipeline_layout_info{};
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 
-    pipeline_layout_info.setLayoutCount = static_cast<uint32_t>(descriptor_sets_.size());
-    pipeline_layout_info.pSetLayouts = descriptor_sets_.data();
+    pipeline_layout_info.setLayoutCount = static_cast<uint32_t>(set_layouts.size());
+    pipeline_layout_info.pSetLayouts = set_layouts.data();
 
     pipeline_layout_info.pushConstantRangeCount = 0;     // Optional
     pipeline_layout_info.pPushConstantRanges = nullptr;  // Optional
@@ -232,10 +263,9 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
 
     shaders_.clear();
     shader_stages_.clear();
-    descriptor_sets_.clear();
 
     return std::make_shared<GraphicsPipeline>(GraphicsPipeline::PrivateToken{}, surface_device_,
-                                              swap_chain_, render_pass_, layout, pipeline);
+                                              swap_chain_, render_pass_, layout, pipeline, std::move(descriptor_layouts_));
 }
 
 DepthBuffer::~DepthBuffer() {
@@ -346,6 +376,62 @@ begin_render_pass& begin_render_pass::operator=(begin_render_pass&& other) noexc
     return *this;
 }
 
+start_rendering::start_rendering(CommandBuffer::ptr command_buffer, VkRect2D area,
+                                 const helpers::ImageView& color_attachment,
+                                 const helpers::ImageView& depth_attachment, const glm::vec4& clear_color)
+    : command_buffer_(command_buffer) {
+
+    VkRenderingAttachmentInfo color_attachment_info{};
+    color_attachment_info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    color_attachment_info.pNext = nullptr;
+
+    color_attachment_info.imageView = color_attachment.view;
+    color_attachment_info.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color_attachment_info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color_attachment_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    color_attachment_info.clearValue.color
+        = {clear_color.x, clear_color.y, clear_color.z, clear_color.w};
+
+    VkRenderingAttachmentInfo depth_attachment_info{};
+    depth_attachment_info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depth_attachment_info.pNext = nullptr;
+
+    depth_attachment_info.imageView = depth_attachment.view;
+    depth_attachment_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depth_attachment_info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_attachment_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depth_attachment_info.clearValue.depthStencil = {1.f, 0};
+
+    VkRenderingInfo render_info{};
+    render_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    render_info.pNext = nullptr;
+
+    render_info.renderArea = area;
+    render_info.layerCount = 1;
+    render_info.colorAttachmentCount = 1;
+    render_info.pColorAttachments = &color_attachment_info;
+    render_info.pDepthAttachment = &depth_attachment_info;
+    render_info.pStencilAttachment = &depth_attachment_info;
+
+    vkCmdBeginRendering(*command_buffer_, &render_info);
+}
+
+start_rendering::~start_rendering() {
+    if (command_buffer_) {
+        vkCmdEndRenderPass(command_buffer_->command_buffer);
+    }
+}
+
+start_rendering::start_rendering(start_rendering&& other) noexcept {
+    *this = std::move(other);
+}
+
+start_rendering& start_rendering::operator=(start_rendering&& other) noexcept {
+    std::swap(command_buffer_, other.command_buffer_);
+
+    return *this;
+}
+
 DefaultRenderSyncObjects::~DefaultRenderSyncObjects() {
     vkDestroyFence(*surface_device_, in_flight, nullptr);
     vkDestroySemaphore(*surface_device_, render_finished, nullptr);
@@ -396,6 +482,224 @@ Semaphore::ptr Semaphore::create(vk::SurfaceDevice::ptr device) {
     helpers::check_vulkan(vkCreateSemaphore(device->device, &semaphore_info, nullptr, &semaphore));
 
     return std::make_shared<Semaphore>(PrivateToken{}, device, semaphore);
+}
+
+DescriptorUpdater::DescriptorUpdater(SurfaceDevice::ptr device) : device_(device) {}
+
+DescriptorUpdater& DescriptorUpdater::with_ubo(uint32_t binding, Buffer::ptr buffer,
+                                               std::optional<size_t> offset,
+                                               std::optional<size_t> size) {
+    auto& desc_write = add_write(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    desc_write.dstBinding = binding;
+
+    auto& buffer_info = buffer_infos_.emplace_back();
+    buffer_info.buffer = buffer->buffer;
+    buffer_info.offset = offset.value_or(0);
+    buffer_info.range = offset.value_or(buffer->size());
+
+    desc_write.pBufferInfo = &buffer_info;
+
+    return *this;
+}
+
+DescriptorUpdater& DescriptorUpdater::with_ssbo(uint32_t binding, Buffer::ptr buffer,
+                                                std::optional<size_t> offset,
+                                                std::optional<size_t> size) {
+    auto& desc_write = add_write(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    desc_write.dstBinding = binding;
+
+    auto& buffer_info = buffer_infos_.emplace_back();
+    buffer_info.buffer = buffer->buffer;
+    buffer_info.offset = offset.value_or(0);
+    buffer_info.range = offset.value_or(buffer->size());
+
+    desc_write.pBufferInfo = &buffer_info;
+
+    return *this;
+}
+
+DescriptorUpdater& DescriptorUpdater::with_sampled_image(uint32_t binding, Texture::ptr texture,
+                                                         vk::Sampler::ptr sampler,
+                                                         std::optional<VkImageLayout> layout) {
+    auto& desc_write = add_write(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    desc_write.dstBinding = binding;
+
+    auto& image_info = image_infos_.emplace_back();
+    image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_info.imageView = texture->view;
+    image_info.sampler = *sampler;
+
+    desc_write.pImageInfo = &image_info;
+
+    return *this;
+}
+
+DescriptorUpdater& DescriptorUpdater::with_storage_image(uint32_t binding, Texture::ptr texture,
+                                                         std::optional<VkImageLayout> layout) {
+    auto& desc_write = add_write(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    desc_write.dstBinding = binding;
+
+    auto& image_info = image_infos_.emplace_back();
+    image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_info.imageView = texture->view;
+
+    desc_write.pImageInfo = &image_info;
+
+    return *this;
+}
+
+void DescriptorUpdater::update(VkDescriptorSet desc) {
+    std::set<uint32_t> used_bindings;
+    for (auto& write : writes_) {
+        used_bindings.insert(write.dstBinding);
+        write.dstSet = desc;
+    }
+
+    if (used_bindings.size() != writes_.size()) {
+        throw std::invalid_argument("Repeated binding point used");
+    }
+
+    vkUpdateDescriptorSets(*device_, static_cast<uint32_t>(writes_.size()), writes_.data(), 0,
+                           nullptr);
+}
+
+VkWriteDescriptorSet& DescriptorUpdater::add_write(VkDescriptorType type) {
+    auto& descriptor_write = writes_.emplace_back();
+    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+
+    // dstSet will be populated in update() for potential re-use;
+    
+    descriptor_write.dstArrayElement = 0;
+    descriptor_write.descriptorCount = 1;
+    descriptor_write.descriptorType = type;
+
+    descriptor_write.pBufferInfo = nullptr;
+    descriptor_write.pImageInfo = nullptr;
+    descriptor_write.pTexelBufferView = nullptr;
+
+    return descriptor_write;
+}
+
+DescriptorAllocator::DescriptorAllocator(SurfaceDevice::ptr device, size_t set_size,
+                                         std::vector<PoolSizeRatio> ratios)
+    : device_(device), set_size_(set_size), ratios_(std::move(ratios)) {}
+
+DescriptorAllocator::~DescriptorAllocator() {
+    for (auto pool : active_pools_) {
+        vkDestroyDescriptorPool(*device_, pool, nullptr);
+    }
+
+    for (auto pool : full_pools_) {
+        vkDestroyDescriptorPool(*device_, pool, nullptr);
+    }
+}
+
+DescriptorAllocator::DescriptorAllocator(DescriptorAllocator&& other) noexcept {
+    *this = std::move(other);
+}
+
+DescriptorAllocator& DescriptorAllocator::operator=(DescriptorAllocator&& other) noexcept {
+    std::swap(device_, other.device_);
+    std::swap(ratios_, other.ratios_);
+    std::swap(set_size_, other.set_size_);
+    std::swap(full_pools_, other.full_pools_);
+    std::swap(active_pools_, other.active_pools_);
+
+    return *this;
+}
+
+DescriptorSet DescriptorAllocator::allocate(VkDescriptorSetLayout layout) {
+    VkDescriptorPool pool = next_pool();
+
+    VkDescriptorSetAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc_info.descriptorPool = pool;
+    alloc_info.descriptorSetCount = 1;
+    alloc_info.pSetLayouts = &layout;
+
+    VkDescriptorSet desc;
+    VkResult result = vkAllocateDescriptorSets(*device_, &alloc_info, &desc);
+
+    // get a fresh pool on allocation failure
+    if (result == VK_ERROR_OUT_OF_POOL_MEMORY || result == VK_ERROR_FRAGMENTED_POOL) {
+        full_pools_.push_back(pool);
+
+        pool = next_pool();
+        alloc_info.descriptorPool = pool;
+
+        helpers::check_vulkan(vkAllocateDescriptorSets(*device_, &alloc_info, &desc));
+    } else {
+        helpers::check_vulkan(result);
+    }
+
+    active_pools_.push_back(pool);
+    return DescriptorSet{desc};
+}
+
+void DescriptorAllocator::clear() {
+    for (auto pool : active_pools_) {
+        helpers::check_vulkan(vkResetDescriptorPool(*device_, pool, 0));
+    }
+
+    for (auto pool : full_pools_) {
+        helpers::check_vulkan(vkResetDescriptorPool(*device_, pool, 0));
+    }
+
+    active_pools_.insert(active_pools_.end(), full_pools_.begin(), full_pools_.end());
+    full_pools_.clear();
+}
+
+VkDescriptorPool DescriptorAllocator::next_pool() {
+    VkDescriptorPool pool;
+    if (!active_pools_.empty()) {
+        pool = active_pools_.back();
+        active_pools_.pop_back();
+    } else {
+        std::vector<VkDescriptorPoolSize> pool_sizes;
+        for (PoolSizeRatio ratio : ratios_) {
+            pool_sizes.push_back({ratio.type, static_cast<uint32_t>(ratio.ratio * set_size_)});
+        }
+
+        VkDescriptorPoolCreateInfo pool_info = {};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.flags = 0;
+        pool_info.maxSets = static_cast<uint32_t>(set_size_);
+        pool_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+        pool_info.pPoolSizes = pool_sizes.data();
+
+        vkCreateDescriptorPool(*device_, &pool_info, nullptr, &pool);
+    }
+
+    return pool;
+}
+
+DescriptorLayout::~DescriptorLayout() { vkDestroyDescriptorSetLayout(*device_, layout, nullptr); }
+
+DescriptorLayout::ptr DescriptorLayout::create(SurfaceDevice::ptr device,
+                                             const std::vector<DescParameter>& params) {
+    std::vector<VkDescriptorSetLayoutBinding> set_layouts;
+
+    for (const auto& param : params) {
+        auto param_desc = to_desc_type(param.type);
+
+        auto& layout = set_layouts.emplace_back();
+        layout.binding = param.binding;
+        layout.descriptorType = param_desc;
+        layout.descriptorCount = 1;
+        layout.stageFlags = param.shader_stages;
+        layout.pImmutableSamplers = nullptr;  // Optional
+    }
+
+    VkDescriptorSetLayoutCreateInfo layout_info{};
+    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_info.bindingCount = static_cast<uint32_t>(set_layouts.size());
+    layout_info.pBindings = set_layouts.data();
+
+    VkDescriptorSetLayout descriptor_layout;
+    vk::helpers::check_vulkan(
+        vkCreateDescriptorSetLayout(*device, &layout_info, nullptr, &descriptor_layout));
+
+    return std::make_shared<DescriptorLayout>(PrivateToken{}, device, descriptor_layout);
 }
 
 }  // namespace spor::vk
