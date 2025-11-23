@@ -13,6 +13,11 @@
 namespace spor {
 
 void TestScene::setup() {
+    depth_buffer_ = vk::DepthBuffer::create(surface_device_, swap_chain_->extent.width,
+                                            swap_chain_->extent.height);
+    draw_image_ = vk::DrawImage::create(surface_device_, swap_chain_->extent.width,
+                                        swap_chain_->extent.height);
+
     mvp_ubo_ = vk::create_uniform_buffer(surface_device_, 1, sizeof(MVPUniformBuffer));
     mvp_mapping_ = std::make_unique<vk::PersistentMapping<MVPUniformBuffer>>(mvp_ubo_);
 
@@ -24,30 +29,18 @@ void TestScene::setup() {
                                  "C:/Users/nicho/Downloads/viking_room.obj",
                                  "C:/Users/nicho/Downloads/viking_room.png");
 
-    // descriptors_ = vk::PipelineDescriptors::create(
-    //    surface_device_,
-    //    {
-    //        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT,
-    //         vk::DescriptorInfo::DBuffer{mvp_ubo_, mvp_ubo_->size()}},
-    //        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT,
-    //         vk::DescriptorInfo::DSampler{model_->texture(), sampler_}},
-    //    });
-
-    render_pass_ = vk::RenderPass::create(surface_device_, swap_chain_,
-                                          vk::DepthBuffer::default_format(surface_device_));
-
     global_desc_layout_ = vk::DescriptorLayout::create(
         surface_device_, {{0, vk::DescParameter::kUBO, VK_SHADER_STAGE_VERTEX_BIT}});
 
-    graphics_pipeline_ = vk::GraphicsPipelineBuilder(surface_device_, swap_chain_, render_pass_)  //
-                             .enable_depth_testing()                                              //
-                             .add_vertex_shader(spor::shaders::test::vert)                        //
-                             .add_fragment_shader(spor::shaders::test::frag)                      //
-                             .set_vertex_descriptors(model_->vertex_binding_description(),        //
-                                                     model_->vertex_attribute_descriptions())     //
-                             .add_global_layout(global_desc_layout_)                              //
-                             .add_local_layout({{0, vk::DescParameter::kSampledImage,             //
-                                                 VK_SHADER_STAGE_FRAGMENT_BIT}})                  //
+    graphics_pipeline_ = vk::GraphicsPipelineBuilder(surface_device_, swap_chain_, nullptr)    //
+                             .enable_depth_testing()                                           //
+                             .add_vertex_shader(spor::shaders::test::vert)                     //
+                             .add_fragment_shader(spor::shaders::test::frag)                   //
+                             .set_vertex_descriptors(model_->vertex_binding_description(),     //
+                                                     model_->vertex_attribute_descriptions())  //
+                             .add_global_layout(global_desc_layout_)                           //
+                             .add_local_layout({{0, vk::DescParameter::kSampledImage,          //
+                                                 VK_SHADER_STAGE_FRAGMENT_BIT}})               //
                              .build();
 
     desc_allocator_ = std::make_unique<vk::DescriptorAllocator>(
@@ -69,8 +62,6 @@ void TestScene::setup() {
     vk::DescriptorUpdater(surface_device_)                   //
         .with_sampled_image(0, model_->texture(), sampler_)  //
         .update(model_desc_);
-
-    framebuffers_ = vk::SwapChainFramebuffers::create(surface_device_, swap_chain_, render_pass_);
 }
 
 void TestScene::render(CallSubmitter& submitter, uint32_t framebuffer_index) {
@@ -79,20 +70,15 @@ void TestScene::render(CallSubmitter& submitter, uint32_t framebuffer_index) {
     auto cmd_buffer = cmd_pool_->primary_buffer(true);
     vk::record_commands rc(cmd_buffer);
 
-    vk::transition_image(cmd_buffer, swap_chain_->image_view(framebuffer_index),
-                         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    vk::transition_image(cmd_buffer, draw_image_->image_view(), VK_IMAGE_LAYOUT_UNDEFINED,
+                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    vk::transition_image(cmd_buffer, depth_buffer_->image_view(), VK_IMAGE_LAYOUT_UNDEFINED,
+                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
     VkRect2D view_rect{{0, 0}, swap_chain_->extent};
     {
-        vk::start_rendering sr(cmd_buffer, view_rect, swap_chain_->image_view(framebuffer_index),
-                               framebuffers_->depth_buffer->image_view());
-
-        vkCmdBindPipeline(*cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          graphics_pipeline_->graphics_pipeline);
-
-        vkCmdBindDescriptorSets(*cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                graphics_pipeline_->pipeline_layout, 0, 1,
-                                &global_desc_.descriptor_set, 0, nullptr);
+        vk::start_rendering sr(cmd_buffer, view_rect, draw_image_->image_view(),
+                               depth_buffer_->image_view());
 
         VkViewport viewport{};
         viewport.x = 0.0f;
@@ -108,12 +94,27 @@ void TestScene::render(CallSubmitter& submitter, uint32_t framebuffer_index) {
         scissor.extent = swap_chain_->extent;
         vkCmdSetScissor(*cmd_buffer, 0, 1, &scissor);
 
+        vkCmdBindPipeline(*cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          graphics_pipeline_->graphics_pipeline);
+
+        vkCmdBindDescriptorSets(*cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                graphics_pipeline_->pipeline_layout, 0, 1,
+                                &global_desc_.descriptor_set, 0, nullptr);
+
         model_->draw(cmd_buffer, model_desc_, graphics_pipeline_);
     }
 
-    vk::transition_image(cmd_buffer, swap_chain_->image_view(framebuffer_index),
+    vk::transition_image(cmd_buffer, draw_image_->image_view(),
                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    vk::transition_image(cmd_buffer, swap_chain_->image_view(framebuffer_index),
+                         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    vk::blit_image(cmd_buffer, draw_image_->image_view(),
+                   swap_chain_->image_view(framebuffer_index));
+
+    vk::transition_image(cmd_buffer, swap_chain_->image_view(framebuffer_index),
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     submitter.submit_draw(surface_device_->queues.graphics, cmd_buffer);
 }

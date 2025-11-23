@@ -141,6 +141,36 @@ public:
           height(height) {}
 };
 
+class DrawImage : public helpers::VulkanObject<DrawImage> {
+public:
+    ~DrawImage();
+
+public:
+    static ptr create(SurfaceDevice::ptr surface_device, size_t width, size_t height);
+
+    helpers::ImageView image_view() { return helpers::ImageView{image, view, width, height}; }
+
+public:
+    VkImage image;
+    VkImageView view;
+    VkDeviceMemory memory;
+
+    size_t width, height;
+
+private:
+    SurfaceDevice::ptr surface_device_;
+
+public:
+    DrawImage(PrivateToken, SurfaceDevice::ptr surface_device, VkImage image, VkImageView view,
+            VkDeviceMemory memory, size_t width, size_t height)
+        : surface_device_(surface_device),
+          image(image),
+          view(view),
+          memory(memory),
+          width(width),
+          height(height) {}
+};
+
 CommandBuffer::ptr transition_texture(SurfaceDevice::ptr device, CommandPool::ptr pool,
                                       Texture::ptr texture, VkImageLayout from_layout,
                                       VkImageLayout to_layout);

@@ -41,6 +41,9 @@ private:
     void update_uniform_buffers();
 
 private:
+    vk::DepthBuffer::ptr depth_buffer_;
+    vk::DrawImage::ptr draw_image_;
+
     vk::CommandPool::ptr cmd_pool_;
 
     vk::Model::ptr model_;
@@ -51,22 +54,15 @@ private:
     glm::vec2 orbit_rot_{};
     float orbit_radius_ = 5.f;
 
-    // vk::Texture::ptr texture_;
     vk::Sampler::ptr sampler_;
 
-    // vk::PipelineDescriptors::ptr descriptors_;
     std::unique_ptr<vk::DescriptorAllocator> desc_allocator_;
 
     vk::DescriptorLayout::ptr global_desc_layout_;
     vk::DescriptorSet global_desc_;
     vk::DescriptorSet model_desc_;
 
-    vk::RenderPass::ptr render_pass_;
-
     vk::GraphicsPipeline::ptr graphics_pipeline_;
-    // TODO: move framebuffers out of individual scenes and into the app window state. The Scene can
-    // provide a window pass back to the aws object
-    vk::SwapChainFramebuffers::ptr framebuffers_;
 };
 
 }  // namespace spor

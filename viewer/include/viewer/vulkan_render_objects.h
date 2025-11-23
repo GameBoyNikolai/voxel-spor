@@ -246,34 +246,32 @@ public:
 public:
     static VkFormat default_format(SurfaceDevice::ptr surface_device);
 
-    static ptr create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain,
-                      VkFormat format);
+    static ptr create(SurfaceDevice::ptr surface_device, size_t w, size_t h, VkFormat format);
 
-    static ptr create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain);
+    static ptr create(SurfaceDevice::ptr surface_device, size_t w, size_t h);
 
 public:
-    helpers::ImageView image_view() {
-        return helpers::ImageView{image, view, swap_chain_->extent.width,
-                                  swap_chain_->extent.height};
-    }
+    helpers::ImageView image_view() { return helpers::ImageView{image, view, width, height}; }
 
 public:
     VkImage image;
     VkImageView view;
     VkDeviceMemory memory;
 
+    size_t width, height;
+
 private:
     SurfaceDevice::ptr surface_device_;
-    SwapChain::ptr swap_chain_;
 
 public:
-    DepthBuffer(PrivateToken, SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain,
-                VkImage image, VkImageView view, VkDeviceMemory memory)
+    DepthBuffer(PrivateToken, SurfaceDevice::ptr surface_device, VkImage image, VkImageView view,
+                VkDeviceMemory memory, size_t width, size_t height)
         : surface_device_(surface_device),
-          swap_chain_(swap_chain),
           image(image),
           view(view),
-          memory(memory) {}
+          memory(memory),
+          width(width),
+          height(height) {}
 };
 
 class SwapChainFramebuffers : public helpers::VulkanObject<SwapChainFramebuffers> {

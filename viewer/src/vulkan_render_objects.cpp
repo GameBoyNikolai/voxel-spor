@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <array>
-#include <stdexcept>
 #include <iterator>
+#include <stdexcept>
 
 namespace spor::vk {
 
@@ -216,7 +216,8 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
     std::vector<VkDescriptorSetLayout> set_layouts;
     set_layouts.reserve(descriptor_layouts_.size());
     std::transform(descriptor_layouts_.begin(), descriptor_layouts_.end(),
-                   std::back_inserter(set_layouts), [](const auto& layout) { return layout->layout; });
+                   std::back_inserter(set_layouts),
+                   [](const auto& layout) { return layout->layout; });
 
     VkPipelineLayoutCreateInfo pipeline_layout_info{};
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -247,7 +248,9 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
 
     pipeline_info.layout = layout;
 
-    pipeline_info.renderPass = *render_pass_;
+    if (render_pass_) {
+        pipeline_info.renderPass = *render_pass_;
+    }
     pipeline_info.subpass = 0;
 
     pipeline_info.basePipelineHandle = VK_NULL_HANDLE;  // Optional
@@ -265,7 +268,8 @@ GraphicsPipeline::ptr GraphicsPipelineBuilder::build() {
     shader_stages_.clear();
 
     return std::make_shared<GraphicsPipeline>(GraphicsPipeline::PrivateToken{}, surface_device_,
-                                              swap_chain_, render_pass_, layout, pipeline, std::move(descriptor_layouts_));
+                                              swap_chain_, render_pass_, layout, pipeline,
+                                              std::move(descriptor_layouts_));
 }
 
 DepthBuffer::~DepthBuffer() {
@@ -281,22 +285,21 @@ VkFormat DepthBuffer::default_format(SurfaceDevice::ptr surface_device) {
         VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
 }
 
-DepthBuffer::ptr DepthBuffer::create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain,
+DepthBuffer::ptr DepthBuffer::create(SurfaceDevice::ptr surface_device, size_t w, size_t h,
                                      VkFormat format) {
     auto [image, memory] = helpers::create_image(
-        surface_device->device, surface_device->physical_device, swap_chain->extent.width,
-        swap_chain->extent.height, format, VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        surface_device->device, surface_device->physical_device, w, h, format,
+        VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     auto view
         = helpers::create_image_view(*surface_device, image, format, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-    return std::make_shared<DepthBuffer>(PrivateToken{}, surface_device, swap_chain, image, view,
-                                         memory);
+    return std::make_shared<DepthBuffer>(PrivateToken{}, surface_device, image, view, memory, w, h);
 }
 
-DepthBuffer::ptr DepthBuffer::create(SurfaceDevice::ptr surface_device, SwapChain::ptr swap_chain) {
-    return create(surface_device, swap_chain, default_format(surface_device));
+DepthBuffer::ptr DepthBuffer::create(SurfaceDevice::ptr surface_device, size_t w, size_t h) {
+    return create(surface_device, w, h, default_format(surface_device));
 }
 
 SwapChainFramebuffers::~SwapChainFramebuffers() {
@@ -310,7 +313,7 @@ SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surf
                                                          RenderPass::ptr render_pass) {
     DepthBuffer::ptr depth_buffer;
     if (render_pass->depth_stencil_format) {
-        depth_buffer = DepthBuffer::create(surface_device, swap_chain);
+        depth_buffer = DepthBuffer::create(surface_device, swap_chain->extent.width, swap_chain->extent.height);
     }
 
     std::vector<VkFramebuffer> framebuffers(swap_chain->swap_chain_views.size());
@@ -378,9 +381,9 @@ begin_render_pass& begin_render_pass::operator=(begin_render_pass&& other) noexc
 
 start_rendering::start_rendering(CommandBuffer::ptr command_buffer, VkRect2D area,
                                  const helpers::ImageView& color_attachment,
-                                 const helpers::ImageView& depth_attachment, const glm::vec4& clear_color)
+                                 const helpers::ImageView& depth_attachment,
+                                 const glm::vec4& clear_color)
     : command_buffer_(command_buffer) {
-
     VkRenderingAttachmentInfo color_attachment_info{};
     color_attachment_info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     color_attachment_info.pNext = nullptr;
@@ -422,9 +425,7 @@ start_rendering::~start_rendering() {
     }
 }
 
-start_rendering::start_rendering(start_rendering&& other) noexcept {
-    *this = std::move(other);
-}
+start_rendering::start_rendering(start_rendering&& other) noexcept { *this = std::move(other); }
 
 start_rendering& start_rendering::operator=(start_rendering&& other) noexcept {
     std::swap(command_buffer_, other.command_buffer_);
@@ -568,7 +569,7 @@ VkWriteDescriptorSet& DescriptorUpdater::add_write(VkDescriptorType type) {
     descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
     // dstSet will be populated in update() for potential re-use;
-    
+
     descriptor_write.dstArrayElement = 0;
     descriptor_write.descriptorCount = 1;
     descriptor_write.descriptorType = type;
@@ -676,7 +677,7 @@ VkDescriptorPool DescriptorAllocator::next_pool() {
 DescriptorLayout::~DescriptorLayout() { vkDestroyDescriptorSetLayout(*device_, layout, nullptr); }
 
 DescriptorLayout::ptr DescriptorLayout::create(SurfaceDevice::ptr device,
-                                             const std::vector<DescParameter>& params) {
+                                               const std::vector<DescParameter>& params) {
     std::vector<VkDescriptorSetLayoutBinding> set_layouts;
 
     for (const auto& param : params) {

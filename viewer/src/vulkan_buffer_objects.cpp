@@ -159,6 +159,27 @@ Texture::ptr Texture::create(SurfaceDevice::ptr surface_device, size_t width, si
                                      height);
 }
 
+DrawImage::~DrawImage() {
+    vkDestroyImageView(*surface_device_, view, nullptr);
+    vkDestroyImage(*surface_device_, image, nullptr);
+    vkFreeMemory(*surface_device_, memory, nullptr);
+}
+
+DrawImage::ptr DrawImage::create(SurfaceDevice::ptr surface_device, size_t width, size_t height) {
+    VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;  // supported on basically all modern hardware
+
+    auto [image, memory] = helpers::create_image(
+        surface_device->device, surface_device->physical_device, width, height, format,
+        VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    auto view
+        = helpers::create_image_view(*surface_device, image, format, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    return std::make_shared<DrawImage>(PrivateToken{}, surface_device, image, view, memory, width,
+                                     height);
+}
+
 CommandBuffer::ptr transition_texture(SurfaceDevice::ptr device, CommandPool::ptr pool,
                                       Texture::ptr texture, VkImageLayout from_layout,
                                       VkImageLayout to_layout) {
