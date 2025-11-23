@@ -2,12 +2,12 @@
 
 #include <array>
 
-#include "viewer/vulkan_buffer_objects.h"
+#include "viewer/model.h"
 #include "viewer/vulkan_application.h"
 #include "viewer/vulkan_base_objects.h"
-#include "viewer/vulkan_render_objects.h"
+#include "viewer/vulkan_buffer_objects.h"
 #include "viewer/vulkan_compute.h"
-#include "viewer/model.h"
+#include "viewer/vulkan_render_objects.h"
 
 namespace spor {
 
@@ -29,15 +29,26 @@ public:
 public:
     virtual void setup() override;
 
-    virtual void render(CallSubmitter& submitter, uint32_t framebuffer_index) override;
+    virtual vk::Semaphore::ptr render(uint32_t framebuffer_index,
+                                      vk::Semaphore::ptr swap_chain_ready) override;
 
     virtual void teardown() override;
 
-private:
-    vk::CommandBuffer::ptr update_particles();
+public:
+    virtual void block_for_current_frame() override{};
 
 private:
-    vk::CommandPool::ptr gfx_cmd_pool_, cmp_cmd_pool_;
+    void update_particles(vk::CommandBuffer::ptr cmd_buf);
+
+private:
+    vk::Fence::ptr frame_fence_;
+    vk::Semaphore::ptr frame_finished_;
+
+    vk::Semaphore::ptr compute_finished_;
+
+    vk::CommandPool::ptr cmd_pool_;
+
+    vk::CommandBuffer::ptr cmp_buffer_;
 
     vk::Buffer::ptr kernel_ubo_;
     std::unique_ptr<vk::PersistentMapping<KernelUBO>> kernel_ubo_mapping_;

@@ -41,9 +41,9 @@ public:
         : instance_(instance),
           window_(window),
           device_(device),
-          sync_objects_(vk::DefaultRenderSyncObjects::create(device)),
+          swap_chain_ready_(vk::Semaphore::create(device))/*,
           compute_in_flight_(vk::Fence::create(device)),
-          compute_finished_(vk::Semaphore::create(device)) {
+          compute_finished_(vk::Semaphore::create(device))*/ {
         int pixel_w, pixel_h;
         SDL_GetWindowSizeInPixels(*window_, &pixel_w, &pixel_h);
         swap_chain_ = vk::SwapChain::create(device_, static_cast<uint32_t>(pixel_w),
@@ -64,73 +64,72 @@ public:
     void draw() {
         // resize swap chain?
 
-        vkWaitForFences(device_->device, 1, &sync_objects_->in_flight, VK_TRUE,
-                        std::numeric_limits<uint64_t>::max());
-        vkResetFences(device_->device, 1, &sync_objects_->in_flight);
+        //vkWaitForFences(device_->device, 1, &sync_objects_->in_flight, VK_TRUE,
+        //                std::numeric_limits<uint64_t>::max());
+        //vkResetFences(device_->device, 1, &sync_objects_->in_flight);
 
         uint32_t image_index;
         vkAcquireNextImageKHR(device_->device, swap_chain_->swap_chain,
-                              std::numeric_limits<uint64_t>::max(), sync_objects_->image_available,
+                              std::numeric_limits<uint64_t>::max(), *swap_chain_ready_,
                               VK_NULL_HANDLE, &image_index);
 
-        if (compute_call_last_frame_) {
-            vkWaitForFences(*device_, 1, &compute_in_flight_->fence, VK_TRUE,
-                            std::numeric_limits<uint64_t>::max());
-            vkResetFences(*device_, 1, &compute_in_flight_->fence);
-        }
+        //if (compute_call_last_frame_) {
+        //    vkWaitForFences(*device_, 1, &compute_in_flight_->fence, VK_TRUE,
+        //                    std::numeric_limits<uint64_t>::max());
+        //    vkResetFences(*device_, 1, &compute_in_flight_->fence);
+        //}
 
-        CallSubmitter submitter;
-        scene_->render(submitter, image_index);
+        auto frame_finished = scene_->render(image_index, swap_chain_ready_);
 
-        bool has_compute_call = submitter.has_compute_submissions();
+        //bool has_compute_call = submitter.has_compute_submissions();
         // this is ultimately incorrect/inflexible, but for now process all compute calls then all
         // draw calls
-        for (const auto& [queue, call] : submitter.get_compute_calls()) {
-            VkSubmitInfo submit_info{};
-            submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        //for (const auto& [queue, call] : submitter.get_compute_calls()) {
+        //    VkSubmitInfo submit_info{};
+        //    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-            submit_info.commandBufferCount = 1;
-            submit_info.pCommandBuffers = &call->command_buffer;
-            submit_info.signalSemaphoreCount = 1;
-            submit_info.pSignalSemaphores = &compute_finished_->semaphore;
+        //    submit_info.commandBufferCount = 1;
+        //    submit_info.pCommandBuffers = &call->command_buffer;
+        //    submit_info.signalSemaphoreCount = 1;
+        //    submit_info.pSignalSemaphores = &compute_finished_->semaphore;
 
-            vk::helpers::check_vulkan(
-                vkQueueSubmit(queue.queue, 1, &submit_info, *compute_in_flight_));
-        }
+        //    vk::helpers::check_vulkan(
+        //        vkQueueSubmit(queue.queue, 1, &submit_info, *compute_in_flight_));
+        //}
 
-        for (const auto& [queue, call] : submitter.get_draw_calls()) {
-            VkSubmitInfo submit_info{};
-            submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        //for (const auto& [queue, call] : submitter.get_draw_calls()) {
+        //    VkSubmitInfo submit_info{};
+        //    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-            std::vector<VkSemaphore> wait_semaphores = {sync_objects_->image_available};
-            std::vector<VkPipelineStageFlags> wait_stages
-                = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        //    std::vector<VkSemaphore> wait_semaphores = {sync_objects_->image_available};
+        //    std::vector<VkPipelineStageFlags> wait_stages
+        //        = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
 
-            if (has_compute_call) {
-                wait_semaphores.push_back(compute_finished_->semaphore);
-                wait_stages.push_back(VK_PIPELINE_STAGE_VERTEX_INPUT_BIT);
-            }
+        //    if (has_compute_call) {
+        //        wait_semaphores.push_back(compute_finished_->semaphore);
+        //        wait_stages.push_back(VK_PIPELINE_STAGE_VERTEX_INPUT_BIT);
+        //    }
 
-            submit_info.waitSemaphoreCount = static_cast<uint32_t>(wait_semaphores.size());
-            submit_info.pWaitSemaphores = wait_semaphores.data();
-            submit_info.pWaitDstStageMask = wait_stages.data();
+        //    submit_info.waitSemaphoreCount = static_cast<uint32_t>(wait_semaphores.size());
+        //    submit_info.pWaitSemaphores = wait_semaphores.data();
+        //    submit_info.pWaitDstStageMask = wait_stages.data();
 
-            submit_info.commandBufferCount = 1;
-            submit_info.pCommandBuffers = &call->command_buffer;
+        //    submit_info.commandBufferCount = 1;
+        //    submit_info.pCommandBuffers = &call->command_buffer;
 
-            VkSemaphore signal_semaphores[] = {sync_objects_->render_finished};
-            submit_info.signalSemaphoreCount = 1;
-            submit_info.pSignalSemaphores = signal_semaphores;
+        //    VkSemaphore signal_semaphores[] = {sync_objects_->render_finished};
+        //    submit_info.signalSemaphoreCount = 1;
+        //    submit_info.pSignalSemaphores = signal_semaphores;
 
-            vk::helpers::check_vulkan(
-                vkQueueSubmit(queue.queue, 1, &submit_info, sync_objects_->in_flight));
-        }
+        //    vk::helpers::check_vulkan(
+        //        vkQueueSubmit(queue.queue, 1, &submit_info, sync_objects_->in_flight));
+        //}
 
         VkPresentInfoKHR present_info{};
         present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
         present_info.waitSemaphoreCount = 1;
-        present_info.pWaitSemaphores = &sync_objects_->render_finished;
+        present_info.pWaitSemaphores = &frame_finished->semaphore;
 
         VkSwapchainKHR swap_chains[] = {swap_chain_->swap_chain};
         present_info.swapchainCount = 1;
@@ -141,7 +140,7 @@ public:
 
         vkQueuePresentKHR(device_->queues.present.queue, &present_info);
 
-        compute_call_last_frame_ = has_compute_call;
+        //compute_call_last_frame_ = has_compute_call;
 
         double current_time = static_cast<double>(SDL_GetPerformanceCounter()) / SDL_GetPerformanceFrequency();
         std::string new_title = base_title_ + " | " + std::to_string(1.0 / (current_time - time_));
@@ -205,10 +204,11 @@ private:
     bool requesting_close_{false};
 
     // Scene state
-    vk::DefaultRenderSyncObjects::ptr sync_objects_;
+    //vk::DefaultRenderSyncObjects::ptr sync_objects_;
+    vk::Semaphore::ptr swap_chain_ready_;
 
-    vk::Fence::ptr compute_in_flight_;
-    vk::Semaphore::ptr compute_finished_;
+    //vk::Fence::ptr compute_in_flight_;
+    //vk::Semaphore::ptr compute_finished_;
 
     bool compute_call_last_frame_ = false;
 
@@ -343,44 +343,6 @@ int VulkanApplication::run() {
     }
 
     return 0;
-}
-
-void CallSubmitter::submit_draw(vk::VulkanQueueInfo::QueueBundle queue,
-                                vk::CommandBuffer::ptr cmd_buf) {
-    submissions_.push_back({Call::Type::kDraw, queue, cmd_buf});
-}
-
-void CallSubmitter::submit_compute(vk::VulkanQueueInfo::QueueBundle queue,
-                                   vk::CommandBuffer::ptr cmd_buf) {
-    submissions_.push_back({Call::Type::kCompute, queue, cmd_buf});
-}
-
-bool CallSubmitter::has_compute_submissions() const {
-    return std::any_of(submissions_.begin(), submissions_.end(), [](const auto& submission) {
-        return submission.type == Call::Type::kCompute;
-    });
-}
-
-std::vector<CallSubmitter::QueuedCalls> CallSubmitter::get_draw_calls() const {
-    std::vector<QueuedCalls> queued_calls;
-    for (const auto& [type, queue, call] : submissions_) {
-        if (type == Call::Type::kDraw) {
-            queued_calls.emplace_back(queue, call);
-        }
-    }
-
-    return queued_calls;
-}
-
-std::vector<CallSubmitter::QueuedCalls> CallSubmitter::get_compute_calls() const {
-    std::vector<QueuedCalls> queued_calls;
-    for (const auto& [type, queue, call] : submissions_) {
-        if (type == Call::Type::kCompute) {
-            queued_calls.emplace_back(queue, call);
-        }
-    }
-
-    return queued_calls;
 }
 
 }  // namespace spor

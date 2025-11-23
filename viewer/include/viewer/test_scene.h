@@ -28,9 +28,12 @@ public:
 public:
     virtual void setup() override;
 
-    virtual void render(CallSubmitter& submitter, uint32_t framebuffer_index) override;
+    virtual vk::Semaphore::ptr render(uint32_t framebuffer_index, vk::Semaphore::ptr swap_chain_ready) override;
 
     virtual void teardown() override;
+
+public:
+    virtual void block_for_current_frame() override;
 
 public:
     virtual void on_mouse_drag(MouseButton button, glm::vec2 offset) override;
@@ -41,6 +44,9 @@ private:
     void update_uniform_buffers();
 
 private:
+    vk::Fence::ptr frame_fence_;
+    vk::Semaphore::ptr frame_finished_;
+
     vk::DepthBuffer::ptr depth_buffer_;
     vk::DrawImage::ptr draw_image_;
 

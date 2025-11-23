@@ -51,8 +51,13 @@ struct Particle {
 };
 
 void TestComputeScene::setup() {
-    gfx_cmd_pool_ = vk::CommandPool::create(surface_device_, surface_device_->queues.graphics);
-    cmp_cmd_pool_ = vk::CommandPool::create(surface_device_, surface_device_->queues.graphics);
+    frame_fence_ = vk::Fence::create(surface_device_);
+    frame_finished_ = vk::Semaphore::create(surface_device_);
+    compute_finished_ = vk::Semaphore::create(surface_device_);
+
+    cmd_pool_ = vk::CommandPool::create(surface_device_, surface_device_->queues.graphics);
+
+    cmp_buffer_ = vk::CommandBuffer::create(surface_device_, cmd_pool_);
 
     kernel_ubo_ = vk::create_uniform_buffer(surface_device_, 1, sizeof(KernelUBO));
     kernel_ubo_mapping_ = std::make_unique<vk::PersistentMapping<KernelUBO>>(kernel_ubo_);
@@ -73,7 +78,8 @@ void TestComputeScene::setup() {
 
             float r = 0.1f * std::sqrt(dist(eng));
             float theta = dist(eng) * 2.0f * glm::pi<float>();
-            float x = r * std::cos(theta) * static_cast<float>(swap_chain_->extent.height) / swap_chain_->extent.width;
+            float x = r * std::cos(theta) * static_cast<float>(swap_chain_->extent.height)
+                      / swap_chain_->extent.width;
             float y = r * std::sin(theta);
             particle.position = glm::vec2(x, y);
             particle.velocity = glm::normalize(glm::vec2(x, y)) * 0.055f;
@@ -83,8 +89,9 @@ void TestComputeScene::setup() {
         for (const auto& p_buf : particle_buffers_) {
             auto transfer_buf
                 = vk::create_and_fill_transfer_buffer(surface_device_, particle_init_data);
-            vk::submit_commands(vk::buffer_memcpy(surface_device_, gfx_cmd_pool_, transfer_buf,
-                                                  p_buf, p_buf->size()), surface_device_->queues.graphics.queue);
+            vk::submit_commands(
+                vk::buffer_memcpy(surface_device_, cmd_pool_, transfer_buf, p_buf, p_buf->size()),
+                surface_device_->queues.graphics.queue);
         }
     }
 
@@ -95,69 +102,115 @@ void TestComputeScene::setup() {
     render_pass_ = vk::RenderPass::create(surface_device_, swap_chain_,
                                           vk::DepthBuffer::default_format(surface_device_));
 
-    graphics_pipeline_ = vk::GraphicsPipelineBuilder(surface_device_, swap_chain_, render_pass_)  //
-                             //.enable_depth_testing()                                              //
-                             .add_vertex_shader(spor::shaders::particles::vert)                   //
-                             .add_fragment_shader(spor::shaders::particles::frag)                 //
-                             .set_vertex_descriptors(Particle::binding_description(),             //
-                                                     Particle::attribute_descriptions())          //
-                             .set_primitive_type(VK_PRIMITIVE_TOPOLOGY_POINT_LIST)                //
+    graphics_pipeline_ = vk::GraphicsPipelineBuilder(surface_device_, swap_chain_,
+                                                     render_pass_)  //
+                                                                    //.enable_depth_testing() //
+                             .add_vertex_shader(spor::shaders::particles::vert)           //
+                             .add_fragment_shader(spor::shaders::particles::frag)         //
+                             .set_vertex_descriptors(Particle::binding_description(),     //
+                                                     Particle::attribute_descriptions())  //
+                             .set_primitive_type(VK_PRIMITIVE_TOPOLOGY_POINT_LIST)        //
                              .build();
 
     framebuffers_ = vk::SwapChainFramebuffers::create(surface_device_, swap_chain_, render_pass_);
 }
 
-void TestComputeScene::render(CallSubmitter& submitter, uint32_t framebuffer_index) {
-    submitter.submit_compute(surface_device_->queues.graphics, update_particles());
+vk::Semaphore::ptr TestComputeScene::render(uint32_t framebuffer_index,
+                                            vk::Semaphore::ptr swap_chain_ready) {
+    vkWaitForFences(*surface_device_, 1, &frame_fence_->fence, VK_TRUE,
+                    std::numeric_limits<uint64_t>::max());
+    vkResetFences(*surface_device_, 1, &frame_fence_->fence);
 
-    auto gfx_cmds = gfx_cmd_pool_->primary_buffer(true);
-    vk::record_commands rc(gfx_cmds);
+    {
+        vk::helpers::check_vulkan(vkResetCommandBuffer(*cmp_buffer_, 0));
 
-    VkRect2D view_rect{{0, 0}, swap_chain_->extent};
-    vk::begin_render_pass rp(gfx_cmds, render_pass_,
-                             framebuffers_->framebuffers[framebuffer_index], view_rect);
+        {
+            vk::record_commands rc(cmp_buffer_);
+            update_particles(cmp_buffer_);
+        }
 
-    vkCmdBindPipeline(*gfx_cmds, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      graphics_pipeline_->graphics_pipeline);
+        VkSubmitInfo submit_info{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(view_rect.extent.width);
-    viewport.height = static_cast<float>(view_rect.extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(*gfx_cmds, 0, 1, &viewport);
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = &cmp_buffer_->command_buffer;
+        submit_info.signalSemaphoreCount = 1;
+        submit_info.pSignalSemaphores = &compute_finished_->semaphore;
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = swap_chain_->extent;
-    vkCmdSetScissor(*gfx_cmds, 0, 1, &scissor);
+        vk::helpers::check_vulkan(
+            vkQueueSubmit(surface_device_->queues.graphics.queue, 1, &submit_info, nullptr));
+    }
 
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(*gfx_cmds, 0, 1, &particle_buffers_[0]->buffer, offsets);
+    {
+        auto cmds = cmd_pool_->primary_buffer(true);
+        {
+            vk::record_commands rc(cmds);
 
-    vkCmdDraw(*gfx_cmds, kNumParticles, 1, 0, 0);
+            VkRect2D view_rect{{0, 0}, swap_chain_->extent};
+            vk::begin_render_pass rp(cmds, render_pass_,
+                                     framebuffers_->framebuffers[framebuffer_index], view_rect);
 
-    submitter.submit_draw(surface_device_->queues.graphics, gfx_cmds);
+            vkCmdBindPipeline(*cmds, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              graphics_pipeline_->graphics_pipeline);
+
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = static_cast<float>(view_rect.extent.width);
+            viewport.height = static_cast<float>(view_rect.extent.height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(*cmds, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = {0, 0};
+            scissor.extent = swap_chain_->extent;
+            vkCmdSetScissor(*cmds, 0, 1, &scissor);
+
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(*cmds, 0, 1, &particle_buffers_[0]->buffer, offsets);
+
+            vkCmdDraw(*cmds, kNumParticles, 1, 0, 0);
+        }
+
+        VkSubmitInfo submit_info{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+        std::vector<VkSemaphore> wait_semaphores = {*swap_chain_ready, *compute_finished_};
+        std::vector<VkPipelineStageFlags> wait_stages
+            = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT};
+
+        submit_info.waitSemaphoreCount = static_cast<uint32_t>(wait_semaphores.size());
+        submit_info.pWaitSemaphores = wait_semaphores.data();
+        submit_info.pWaitDstStageMask = wait_stages.data();
+
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = &cmds->command_buffer;
+
+        VkSemaphore signal_semaphores[] = {*frame_finished_};
+        submit_info.signalSemaphoreCount = 1;
+        submit_info.pSignalSemaphores = signal_semaphores;
+
+        vk::helpers::check_vulkan(vkQueueSubmit(surface_device_->queues.graphics.queue, 1,
+                                                &submit_info, frame_fence_->fence));
+    }
+
+    return frame_finished_;
 }
 
 void TestComputeScene::teardown() {}
 
-vk::CommandBuffer::ptr TestComputeScene::update_particles() {
+void TestComputeScene::update_particles(vk::CommandBuffer::ptr cmd_buf) {
     (*kernel_ubo_mapping_)[0] = {0.01666f, static_cast<uint32_t>(kNumParticles)};
 
     // swap in and out buffers
     std::swap(particle_buffers_[0], particle_buffers_[1]);
 
-    auto cmp_cmds = cmp_cmd_pool_->primary_buffer(true);
     vk::Invoker(kernel_)                  //
         .with_ubo(kernel_ubo_)            //
         .with_ssbo(particle_buffers_[0])  //
         .with_ssbo(particle_buffers_[1])  //
-        .invoke(cmp_cmds, kNumParticles / 1024 + (kNumParticles % 1024 > 0 ? 1 : 0));
-
-    return cmp_cmds;
+        .invoke(cmd_buf, kNumParticles / 1024 + (kNumParticles % 1024 > 0 ? 1 : 0));
 }
 
 }  // namespace spor

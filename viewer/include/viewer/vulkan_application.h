@@ -22,32 +22,6 @@ enum class MouseButton {
     kRight,
 };
 
-class CallSubmitter {
-public:
-    void submit_draw(vk::VulkanQueueInfo::QueueBundle queue, vk::CommandBuffer::ptr cmd_buf);
-    void submit_compute(vk::VulkanQueueInfo::QueueBundle queue, vk::CommandBuffer::ptr cmd_buf);
-
-private:
-    struct Call {
-        enum class Type { kDraw, kCompute };
-
-        Type type;
-        vk::VulkanQueueInfo::QueueBundle queue;
-        vk::CommandBuffer::ptr cmd_buf;
-    };
-
-    std::vector<Call> submissions_;
-
-    bool has_compute_submissions() const;
-
-    using QueuedCalls = std::pair<vk::VulkanQueueInfo::QueueBundle, vk::CommandBuffer::ptr>;
-
-    std::vector<QueuedCalls> get_draw_calls() const;
-    std::vector<QueuedCalls> get_compute_calls() const;
-
-    friend class AppWindowState;
-};
-
 class Scene {
 public:
     virtual ~Scene() = default;
@@ -58,9 +32,12 @@ public:
 
     virtual void setup() = 0;
 
-    virtual void render(CallSubmitter& submitter, uint32_t framebuffer_index) = 0;
+    virtual vk::Semaphore::ptr render(uint32_t framebuffer_index, vk::Semaphore::ptr swap_chain_available) = 0;
 
     virtual void teardown() = 0;
+
+public:
+    virtual void block_for_current_frame() = 0;
 
 public:
     virtual void on_mouse_down(MouseButton button) {}
