@@ -55,23 +55,17 @@ void TestScene::setup() {
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
         });
 
-    global_desc_ = desc_allocator_->allocate(*global_desc_layout_);
-    model_desc_ = desc_allocator_->allocate(*graphics_pipeline_->descriptor_layouts[1]);
+    global_desc_ = desc_allocator_->allocate(*global_desc_layout_)
+                       .with_ubo(0, mvp_ubo_)  //
+                       .update();              //
 
-    vk::DescriptorUpdater(surface_device_)  //
-        .with_ubo(0, mvp_ubo_)              //
-        .update(global_desc_);
-
-    vk::DescriptorUpdater(surface_device_)                   //
-        .with_sampled_image(0, model_->texture(), sampler_)  //
-        .update(model_desc_);
+    model_desc_ = desc_allocator_->allocate(*graphics_pipeline_->descriptor_layouts[1])
+                      .with_sampled_image(0, model_->texture(), sampler_)  //
+                      .update();                                           //
 }
 
-vk::Semaphore::ptr TestScene::render(uint32_t framebuffer_index, vk::Semaphore::ptr swap_chain_ready) {
-    vkWaitForFences(*surface_device_, 1, &frame_fence_->fence, VK_TRUE,
-                    std::numeric_limits<uint64_t>::max());
-    vkResetFences(*surface_device_, 1, &frame_fence_->fence);
-
+vk::Semaphore::ptr TestScene::render(uint32_t framebuffer_index,
+                                     vk::Semaphore::ptr swap_chain_ready) {
     update_uniform_buffers();
 
     auto cmd_buffer = cmd_pool_->primary_buffer(true);
@@ -125,8 +119,6 @@ vk::Semaphore::ptr TestScene::render(uint32_t framebuffer_index, vk::Semaphore::
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     }
 
-    //submitter.submit_draw(surface_device_->queues.graphics, cmd_buffer);
-
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
@@ -144,15 +136,19 @@ vk::Semaphore::ptr TestScene::render(uint32_t framebuffer_index, vk::Semaphore::
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = signal_semaphores;
 
-    vk::helpers::check_vulkan(
-        vkQueueSubmit(surface_device_->queues.graphics.queue, 1, &submit_info, frame_fence_->fence));
+    vk::helpers::check_vulkan(vkQueueSubmit(surface_device_->queues.graphics.queue, 1, &submit_info,
+                                            frame_fence_->fence));
 
     return frame_finished_;
 }
 
 void TestScene::teardown() {}
 
-void TestScene::block_for_current_frame() {}
+void TestScene::block_for_current_frame() {
+    vkWaitForFences(*surface_device_, 1, &frame_fence_->fence, VK_TRUE,
+                    std::numeric_limits<uint64_t>::max());
+    vkResetFences(*surface_device_, 1, &frame_fence_->fence);
+}
 
 void TestScene::on_mouse_drag(MouseButton button, glm::vec2 offset) {
     constexpr float kSpeed = glm::radians(0.1f);

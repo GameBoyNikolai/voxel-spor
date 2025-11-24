@@ -58,7 +58,7 @@ public:
 
 class DescriptorUpdater : public helpers::NonCopyable {
 public:
-    DescriptorUpdater(SurfaceDevice::ptr device);
+    DescriptorUpdater(SurfaceDevice::ptr device, VkDescriptorSet desc);
     ~DescriptorUpdater() = default;
 
     DescriptorUpdater(DescriptorUpdater&&) noexcept = default;
@@ -77,12 +77,16 @@ public:
     DescriptorUpdater& with_storage_image(uint32_t binding, Texture::ptr texture,
                                           std::optional<VkImageLayout> layout = std::nullopt);
 
-    void update(VkDescriptorSet desc);
+    DescriptorSet update();
+
+    DescriptorSet get();
 
 private:
     VkWriteDescriptorSet& add_write(VkDescriptorType type);
 
     SurfaceDevice::ptr device_;
+
+    VkDescriptorSet desc_to_update_;
 
     // lists allow us to safely keep pointers to the elements
     std::list<VkDescriptorImageInfo> image_infos_;
@@ -139,7 +143,7 @@ public:
     DescriptorAllocator& operator=(DescriptorAllocator&&) noexcept;
 
 public:
-    DescriptorSet allocate(VkDescriptorSetLayout layout);
+    DescriptorUpdater allocate(VkDescriptorSetLayout layout);
 
     void clear();
 
@@ -251,7 +255,7 @@ public:
     static ptr create(SurfaceDevice::ptr surface_device, size_t w, size_t h);
 
 public:
-    helpers::ImageView image_view() { return helpers::ImageView{image, view, width, height}; }
+    helpers::ImageView image_view() const { return helpers::ImageView{image, view, width, height}; }
 
 public:
     VkImage image;

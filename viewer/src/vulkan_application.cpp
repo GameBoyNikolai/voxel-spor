@@ -41,9 +41,7 @@ public:
         : instance_(instance),
           window_(window),
           device_(device),
-          swap_chain_ready_(vk::Semaphore::create(device))/*,
-          compute_in_flight_(vk::Fence::create(device)),
-          compute_finished_(vk::Semaphore::create(device))*/ {
+          swap_chain_ready_(vk::Semaphore::create(device)) {
         int pixel_w, pixel_h;
         SDL_GetWindowSizeInPixels(*window_, &pixel_w, &pixel_h);
         swap_chain_ = vk::SwapChain::create(device_, static_cast<uint32_t>(pixel_w),
@@ -64,66 +62,14 @@ public:
     void draw() {
         // resize swap chain?
 
-        //vkWaitForFences(device_->device, 1, &sync_objects_->in_flight, VK_TRUE,
-        //                std::numeric_limits<uint64_t>::max());
-        //vkResetFences(device_->device, 1, &sync_objects_->in_flight);
+        scene_->block_for_current_frame();
 
         uint32_t image_index;
         vkAcquireNextImageKHR(device_->device, swap_chain_->swap_chain,
                               std::numeric_limits<uint64_t>::max(), *swap_chain_ready_,
                               VK_NULL_HANDLE, &image_index);
 
-        //if (compute_call_last_frame_) {
-        //    vkWaitForFences(*device_, 1, &compute_in_flight_->fence, VK_TRUE,
-        //                    std::numeric_limits<uint64_t>::max());
-        //    vkResetFences(*device_, 1, &compute_in_flight_->fence);
-        //}
-
         auto frame_finished = scene_->render(image_index, swap_chain_ready_);
-
-        //bool has_compute_call = submitter.has_compute_submissions();
-        // this is ultimately incorrect/inflexible, but for now process all compute calls then all
-        // draw calls
-        //for (const auto& [queue, call] : submitter.get_compute_calls()) {
-        //    VkSubmitInfo submit_info{};
-        //    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
-        //    submit_info.commandBufferCount = 1;
-        //    submit_info.pCommandBuffers = &call->command_buffer;
-        //    submit_info.signalSemaphoreCount = 1;
-        //    submit_info.pSignalSemaphores = &compute_finished_->semaphore;
-
-        //    vk::helpers::check_vulkan(
-        //        vkQueueSubmit(queue.queue, 1, &submit_info, *compute_in_flight_));
-        //}
-
-        //for (const auto& [queue, call] : submitter.get_draw_calls()) {
-        //    VkSubmitInfo submit_info{};
-        //    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
-        //    std::vector<VkSemaphore> wait_semaphores = {sync_objects_->image_available};
-        //    std::vector<VkPipelineStageFlags> wait_stages
-        //        = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-
-        //    if (has_compute_call) {
-        //        wait_semaphores.push_back(compute_finished_->semaphore);
-        //        wait_stages.push_back(VK_PIPELINE_STAGE_VERTEX_INPUT_BIT);
-        //    }
-
-        //    submit_info.waitSemaphoreCount = static_cast<uint32_t>(wait_semaphores.size());
-        //    submit_info.pWaitSemaphores = wait_semaphores.data();
-        //    submit_info.pWaitDstStageMask = wait_stages.data();
-
-        //    submit_info.commandBufferCount = 1;
-        //    submit_info.pCommandBuffers = &call->command_buffer;
-
-        //    VkSemaphore signal_semaphores[] = {sync_objects_->render_finished};
-        //    submit_info.signalSemaphoreCount = 1;
-        //    submit_info.pSignalSemaphores = signal_semaphores;
-
-        //    vk::helpers::check_vulkan(
-        //        vkQueueSubmit(queue.queue, 1, &submit_info, sync_objects_->in_flight));
-        //}
 
         VkPresentInfoKHR present_info{};
         present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -139,8 +85,6 @@ public:
         present_info.pResults = nullptr;  // Optional
 
         vkQueuePresentKHR(device_->queues.present.queue, &present_info);
-
-        //compute_call_last_frame_ = has_compute_call;
 
         double current_time = static_cast<double>(SDL_GetPerformanceCounter()) / SDL_GetPerformanceFrequency();
         std::string new_title = base_title_ + " | " + std::to_string(1.0 / (current_time - time_));
@@ -204,13 +148,7 @@ private:
     bool requesting_close_{false};
 
     // Scene state
-    //vk::DefaultRenderSyncObjects::ptr sync_objects_;
     vk::Semaphore::ptr swap_chain_ready_;
-
-    //vk::Fence::ptr compute_in_flight_;
-    //vk::Semaphore::ptr compute_finished_;
-
-    bool compute_call_last_frame_ = false;
 
     std::unique_ptr<Scene> scene_{nullptr};
 

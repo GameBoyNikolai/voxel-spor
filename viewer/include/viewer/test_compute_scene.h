@@ -35,7 +35,7 @@ public:
     virtual void teardown() override;
 
 public:
-    virtual void block_for_current_frame() override{};
+    virtual void block_for_current_frame() override;
 
 private:
     void update_particles(vk::CommandBuffer::ptr cmd_buf);
@@ -53,7 +53,10 @@ private:
     vk::Buffer::ptr kernel_ubo_;
     std::unique_ptr<vk::PersistentMapping<KernelUBO>> kernel_ubo_mapping_;
 
+    std::unique_ptr<vk::DescriptorAllocator> desc_allocator_;
+
     std::array<vk::Buffer::ptr, 2> particle_buffers_;
+    std::array<vk::DescriptorSet, 2> particle_descs_;
 
     vk::Kernel::ptr kernel_;
 

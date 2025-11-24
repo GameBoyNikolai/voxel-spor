@@ -99,6 +99,28 @@ void TestComputeScene::setup() {
         surface_device_, spor::shaders::particles::comp,
         {vk::Kernel::ParamType::kUBO, vk::Kernel::ParamType::kSSBO, vk::Kernel::ParamType::kSSBO});
 
+    desc_allocator_ = std::make_unique<vk::DescriptorAllocator>(
+        surface_device_, 100,
+        std::vector<vk::DescriptorAllocator::PoolSizeRatio>{
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
+        });
+
+    particle_descs_ = {{
+        desc_allocator_->allocate(kernel_->parameter_layout())
+            .with_ubo(0, kernel_ubo_)            //
+            .with_ssbo(1, particle_buffers_[0])  //
+            .with_ssbo(2, particle_buffers_[1])  //
+            .update(),                           //
+        desc_allocator_->allocate(kernel_->parameter_layout())
+            .with_ubo(0, kernel_ubo_)            //
+            .with_ssbo(1, particle_buffers_[1])  //
+            .with_ssbo(2, particle_buffers_[0])  //
+            .update(),                           //
+    }};
+
     render_pass_ = vk::RenderPass::create(surface_device_, swap_chain_,
                                           vk::DepthBuffer::default_format(surface_device_));
 
@@ -117,10 +139,6 @@ void TestComputeScene::setup() {
 
 vk::Semaphore::ptr TestComputeScene::render(uint32_t framebuffer_index,
                                             vk::Semaphore::ptr swap_chain_ready) {
-    vkWaitForFences(*surface_device_, 1, &frame_fence_->fence, VK_TRUE,
-                    std::numeric_limits<uint64_t>::max());
-    vkResetFences(*surface_device_, 1, &frame_fence_->fence);
-
     {
         vk::helpers::check_vulkan(vkResetCommandBuffer(*cmp_buffer_, 0));
 
@@ -200,17 +218,20 @@ vk::Semaphore::ptr TestComputeScene::render(uint32_t framebuffer_index,
 
 void TestComputeScene::teardown() {}
 
+void TestComputeScene::block_for_current_frame() {
+    vkWaitForFences(*surface_device_, 1, &frame_fence_->fence, VK_TRUE,
+                    std::numeric_limits<uint64_t>::max());
+    vkResetFences(*surface_device_, 1, &frame_fence_->fence);
+}
+
 void TestComputeScene::update_particles(vk::CommandBuffer::ptr cmd_buf) {
     (*kernel_ubo_mapping_)[0] = {0.01666f, static_cast<uint32_t>(kNumParticles)};
 
     // swap in and out buffers
-    std::swap(particle_buffers_[0], particle_buffers_[1]);
+    std::swap(particle_descs_[0], particle_descs_[1]);
 
-    vk::Invoker(kernel_)                  //
-        .with_ubo(kernel_ubo_)            //
-        .with_ssbo(particle_buffers_[0])  //
-        .with_ssbo(particle_buffers_[1])  //
-        .invoke(cmd_buf, kNumParticles / 1024 + (kNumParticles % 1024 > 0 ? 1 : 0));
+    kernel_->invoke(cmd_buf, particle_descs_[0],
+                    kNumParticles / 1024 + (kNumParticles % 1024 > 0 ? 1 : 0));
 }
 
 }  // namespace spor

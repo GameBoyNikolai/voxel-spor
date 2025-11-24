@@ -118,7 +118,7 @@ public:
 public:
     static ptr create(SurfaceDevice::ptr surface_device, size_t width, size_t height);
 
-    helpers::ImageView image_view() { return helpers::ImageView{image, view, width, height}; }
+    helpers::ImageView image_view() const { return helpers::ImageView{image, view, width, height}; }
 
 public:
     VkImage image;
@@ -148,7 +148,7 @@ public:
 public:
     static ptr create(SurfaceDevice::ptr surface_device, size_t width, size_t height);
 
-    helpers::ImageView image_view() { return helpers::ImageView{image, view, width, height}; }
+    helpers::ImageView image_view() const { return helpers::ImageView{image, view, width, height}; }
 
 public:
     VkImage image;

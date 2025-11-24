@@ -313,7 +313,8 @@ SwapChainFramebuffers::ptr SwapChainFramebuffers::create(SurfaceDevice::ptr surf
                                                          RenderPass::ptr render_pass) {
     DepthBuffer::ptr depth_buffer;
     if (render_pass->depth_stencil_format) {
-        depth_buffer = DepthBuffer::create(surface_device, swap_chain->extent.width, swap_chain->extent.height);
+        depth_buffer = DepthBuffer::create(surface_device, swap_chain->extent.width,
+                                           swap_chain->extent.height);
     }
 
     std::vector<VkFramebuffer> framebuffers(swap_chain->swap_chain_views.size());
@@ -485,7 +486,8 @@ Semaphore::ptr Semaphore::create(vk::SurfaceDevice::ptr device) {
     return std::make_shared<Semaphore>(PrivateToken{}, device, semaphore);
 }
 
-DescriptorUpdater::DescriptorUpdater(SurfaceDevice::ptr device) : device_(device) {}
+DescriptorUpdater::DescriptorUpdater(SurfaceDevice::ptr device, VkDescriptorSet desc)
+    : device_(device), desc_to_update_(desc) {}
 
 DescriptorUpdater& DescriptorUpdater::with_ubo(uint32_t binding, Buffer::ptr buffer,
                                                std::optional<size_t> offset,
@@ -549,11 +551,10 @@ DescriptorUpdater& DescriptorUpdater::with_storage_image(uint32_t binding, Textu
     return *this;
 }
 
-void DescriptorUpdater::update(VkDescriptorSet desc) {
+DescriptorSet DescriptorUpdater::update() {
     std::set<uint32_t> used_bindings;
     for (auto& write : writes_) {
         used_bindings.insert(write.dstBinding);
-        write.dstSet = desc;
     }
 
     if (used_bindings.size() != writes_.size()) {
@@ -562,14 +563,17 @@ void DescriptorUpdater::update(VkDescriptorSet desc) {
 
     vkUpdateDescriptorSets(*device_, static_cast<uint32_t>(writes_.size()), writes_.data(), 0,
                            nullptr);
+
+    return DescriptorSet{desc_to_update_};
 }
+
+DescriptorSet DescriptorUpdater::get() { return DescriptorSet{desc_to_update_}; }
 
 VkWriteDescriptorSet& DescriptorUpdater::add_write(VkDescriptorType type) {
     auto& descriptor_write = writes_.emplace_back();
     descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
-    // dstSet will be populated in update() for potential re-use;
-
+    descriptor_write.dstSet = desc_to_update_;
     descriptor_write.dstArrayElement = 0;
     descriptor_write.descriptorCount = 1;
     descriptor_write.descriptorType = type;
@@ -609,7 +613,7 @@ DescriptorAllocator& DescriptorAllocator::operator=(DescriptorAllocator&& other)
     return *this;
 }
 
-DescriptorSet DescriptorAllocator::allocate(VkDescriptorSetLayout layout) {
+DescriptorUpdater DescriptorAllocator::allocate(VkDescriptorSetLayout layout) {
     VkDescriptorPool pool = next_pool();
 
     VkDescriptorSetAllocateInfo alloc_info = {};
@@ -634,7 +638,8 @@ DescriptorSet DescriptorAllocator::allocate(VkDescriptorSetLayout layout) {
     }
 
     active_pools_.push_back(pool);
-    return DescriptorSet{desc};
+
+    return DescriptorUpdater(device_, desc);
 }
 
 void DescriptorAllocator::clear() {
