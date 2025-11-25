@@ -1,4 +1,4 @@
-#include "viewer/vulkan_base_objects.h"
+#include "vkh/base_objects.h"
 
 #include <algorithm>
 #include <iostream>

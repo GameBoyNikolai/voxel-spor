@@ -1,4 +1,4 @@
-#include "viewer/vulkan_helpers.h"
+#include "vkh/helpers.h"
 
 #include <algorithm>
 #include <iostream>

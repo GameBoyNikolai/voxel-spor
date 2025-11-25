@@ -2,10 +2,10 @@
 
 #include <filesystem>
 
-#include "viewer/glm_decl.h"
-#include "viewer/vulkan_buffer_objects.h"
-#include "viewer/vulkan_render_objects.h"
-#include "viewer/vulkan_helpers.h"
+#include "vkh/glm_decl.h"
+#include "vkh/buffer_objects.h"
+#include "vkh/render_objects.h"
+#include "vkh/helpers.h"
 
 namespace spor::vk {
 

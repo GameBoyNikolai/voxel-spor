@@ -1,4 +1,4 @@
-#include "viewer/vulkan_compute.h"
+#include "vkh/compute.h"
 
 #include <algorithm>
 #include <map>

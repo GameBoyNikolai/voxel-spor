@@ -19,6 +19,7 @@ add_executable(
 
 set_target_properties(${EXE_NAME} PROPERTIES FOLDER "Executables")
 
+target_link_libraries(${EXE_NAME} PRIVATE vkh)
 target_link_libraries(${EXE_NAME} PRIVATE voxel)
 target_link_libraries(${EXE_NAME} PRIVATE fmt::fmt)
 target_link_libraries(${EXE_NAME} PRIVATE SDL3::SDL3)

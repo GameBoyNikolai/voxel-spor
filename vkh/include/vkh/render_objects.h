@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
-#include "viewer/glm_decl.h"
-#include "viewer/vulkan_base_objects.h"
-#include "viewer/vulkan_buffer_objects.h"
-#include "viewer/vulkan_helpers.h"
+#include "vkh/glm_decl.h"
+#include "vkh/base_objects.h"
+#include "vkh/buffer_objects.h"
+#include "vkh/helpers.h"
 #include "vulkan/vulkan.h"
 
 namespace spor::vk {

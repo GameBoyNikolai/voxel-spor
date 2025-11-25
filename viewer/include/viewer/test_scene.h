@@ -2,9 +2,9 @@
 
 #include "viewer/model.h"
 #include "viewer/vulkan_application.h"
-#include "viewer/vulkan_base_objects.h"
-#include "viewer/vulkan_buffer_objects.h"
-#include "viewer/vulkan_render_objects.h"
+#include "vkh/base_objects.h"
+#include "vkh/buffer_objects.h"
+#include "vkh/render_objects.h"
 
 namespace spor {
 

@@ -6,7 +6,7 @@
 
 #include "stb_image.h"
 #include "tiny_obj_loader.h"
-#include "viewer/glm_decl.h"
+#include "vkh/glm_decl.h"
 
 namespace spor::vk {
 

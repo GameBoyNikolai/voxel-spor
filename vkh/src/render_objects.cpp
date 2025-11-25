@@ -1,4 +1,4 @@
-#include "viewer/vulkan_render_objects.h"
+#include "vkh/render_objects.h"
 
 #include <algorithm>
 #include <array>

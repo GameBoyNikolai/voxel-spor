@@ -3,8 +3,8 @@
 #include <variant>
 #include <vector>
 
-#include "viewer/vulkan_base_objects.h"
-#include "viewer/vulkan_helpers.h"
+#include "vkh/base_objects.h"
+#include "vkh/helpers.h"
 
 namespace spor::vk {
 

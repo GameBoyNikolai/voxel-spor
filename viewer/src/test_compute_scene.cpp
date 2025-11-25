@@ -9,7 +9,7 @@
 #include "shaders/particles.frag.inl"
 #include "shaders/particles.vert.inl"
 #include "tiny_obj_loader.h"
-#include "viewer/glm_decl.h"
+#include "vkh/glm_decl.h"
 #include "viewer/image_loader.h"
 
 namespace spor {

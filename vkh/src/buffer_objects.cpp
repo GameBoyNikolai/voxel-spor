@@ -1,4 +1,4 @@
-#include "viewer\vulkan_buffer_objects.h"
+#include "vkh\buffer_objects.h"
 
 #include <map>
 #include <stdexcept>

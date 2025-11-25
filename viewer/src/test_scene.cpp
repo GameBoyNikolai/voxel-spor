@@ -7,7 +7,7 @@
 #include "shaders/test.frag.inl"
 #include "shaders/test.vert.inl"
 #include "tiny_obj_loader.h"
-#include "viewer/glm_decl.h"
+#include "vkh/glm_decl.h"
 #include "viewer/image_loader.h"
 
 namespace spor {

@@ -5,9 +5,9 @@
 #include <utility>
 #include <vector>
 
-#include "viewer/glm_decl.h"
-#include "viewer/vulkan_base_objects.h"
-#include "viewer/vulkan_render_objects.h"
+#include "vkh/glm_decl.h"
+#include "vkh/base_objects.h"
+#include "vkh/render_objects.h"
 
 class SDL_Window;
 

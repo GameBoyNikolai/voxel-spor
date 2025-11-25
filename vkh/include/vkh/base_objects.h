@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "viewer/vulkan_helpers.h"
+#include "vkh/helpers.h"
 #include "vulkan/vulkan.h"
 
 struct SDL_Window;

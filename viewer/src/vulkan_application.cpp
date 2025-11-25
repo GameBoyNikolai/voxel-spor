@@ -13,8 +13,8 @@
 #include "fmt/format.h"
 #include "shaders/test.frag.inl"
 #include "shaders/test.vert.inl"
-#include "viewer/glm_decl.h"
-#include "viewer/vulkan_render_objects.h"
+#include "vkh/glm_decl.h"
+#include "vkh/render_objects.h"
 #include "vulkan/vulkan.h"
 
 namespace spor {
@@ -86,7 +86,8 @@ public:
 
         vkQueuePresentKHR(device_->queues.present.queue, &present_info);
 
-        double current_time = static_cast<double>(SDL_GetPerformanceCounter()) / SDL_GetPerformanceFrequency();
+        double current_time
+            = static_cast<double>(SDL_GetPerformanceCounter()) / SDL_GetPerformanceFrequency();
         std::string new_title = base_title_ + " | " + std::to_string(1.0 / (current_time - time_));
         SDL_SetWindowTitle(*window_, new_title.data());
 

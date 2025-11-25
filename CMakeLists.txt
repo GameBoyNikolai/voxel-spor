@@ -88,6 +88,7 @@ find_package(Vulkan COMPONENTS glslangValidator REQUIRED)
 # Targets
 #
 
+add_subdirectory(vkh)
 add_subdirectory(voxel)
 add_subdirectory(res)
 add_subdirectory(viewer)
