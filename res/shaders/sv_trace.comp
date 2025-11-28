@@ -1,0 +1,192 @@
+#version 450
+#extension GL_ARB_gpu_shader_int64 : enable
+
+layout (binding = 0) uniform TracerUBO {
+    mat4 model;
+
+    mat4 view;
+    mat4 projection;
+
+    mat4 inv_vp;
+    mat4 inv_m;
+    vec3 camera_pos;
+} ubo;
+
+struct Info {
+    uvec3 size;
+    uint height;
+};
+
+struct Node {
+    uint leaf_and_offset;
+    uint mask_bottom;
+    uint mask_top;
+};
+
+layout(std140, binding = 1) readonly buffer VDBInfo {
+   Info info;
+};
+
+layout(std430, binding = 2) readonly buffer VDBNodes {
+   Node nodes[];
+};
+
+layout(std430, binding = 3) buffer VDBVoxels {
+   uint voxels[];
+};
+
+layout(binding = 4, rgba8) writeonly uniform image2D out_img;
+
+uint kNumChildren = 64;
+ivec3 kSize = ivec3(4);
+
+bool is_leaf(Node n) {
+    return bool(n.leaf_and_offset & 1);
+}
+
+uint child_offset(Node n) {
+    return n.leaf_and_offset >> 1;
+}
+
+uint64_t child_mask(Node n) {
+    uint64_t mask = n.mask_top;
+    mask <<= 32;
+    mask |= n.mask_bottom;
+    return mask;
+}
+
+uint voxel_data(uint index) {
+    uint element_index = index / 4;
+    uint offset = index % 4;
+    uint qvox = voxels[element_index];
+
+    return (qvox >> (offset * 8)) & 0xFFu;
+}
+
+uint pos_to_index(ivec3 pos, ivec3 size) {
+    return pos.x + pos.y * size.x + pos.z * size.x * size.y;
+}
+
+ivec3 node_size_at_level(uint level, ivec3 base_size) {
+    ivec3 size = ivec3(1);
+    for (int i = 0; i < level; ++i) {
+        size *= base_size;
+    } 
+
+    return size;
+}
+
+uint popcnt64(uint64_t v) {
+    return bitCount(uint(v)) + bitCount(uint(v >> 32));
+}
+
+uint get_child_local_offset(uint64_t child_mask, uint index) {
+    // select only children mask bits *below* the one we're after
+    uint64_t children_up_to_mask = (uint64_t(1) << index) - 1;
+    uint64_t lower_mask = child_mask & children_up_to_mask;
+
+    return popcnt64(lower_mask);
+}
+
+uint get_voxel(ivec3 pos) {
+    Node current = nodes[0];
+    uint current_level = info.height;
+    ivec3 current_min = ivec3(0);
+
+    while (current_level >= 1) {
+        ivec3 pos_in_node = (pos - current_min) / node_size_at_level(current_level - 1, kSize);
+        uint index = pos_to_index(pos_in_node, kSize);
+
+        bool child_active = (child_mask(current) & (uint64_t(1) << index)) > 0;
+        if (!child_active) {
+            return 0;
+        }
+
+        uint child_index = child_offset(current) + get_child_local_offset(child_mask(current), index);
+
+        if (current_level == 1) {
+            return voxel_data(child_index);
+        } else {
+            current = nodes[child_index];
+            --current_level;
+            current_min += pos_in_node * node_size_at_level(current_level, kSize);
+        }
+    }
+
+    return 0;
+}
+
+void get_primary_ray(ivec2 screen_pos, out vec3 ray_pos, out vec3 ray_dir) {
+    // nit: UV re-scaling and anti-alias jitter can be pre-baked in the matrix.
+    vec2 uv = (screen_pos + 0.5) / vec2(imageSize(out_img));
+    uv = uv * 2.0 - 1.0;
+    vec4 far = ubo.inv_vp * vec4(uv, 1.0, 1.0);
+    ray_dir = normalize(far.xyz / far.w);
+    ray_pos = vec3(ubo.inv_m * vec4(ubo.camera_pos, 1.0));
+    //ray_pos = ubo.camera_pos;
+}
+ 
+uint node_cell_index(vec3 pos, uint scale) {
+    uvec3 cell_pos = floatBitsToUint(pos) >> scale & 3;
+    return cell_pos.x + cell_pos.y * 4 + cell_pos.z * 4 * 4;
+}
+
+// floor(pos / scale) * scale
+vec3 floor_scale(vec3 pos, uint scale) {
+    uint mask = ~0u << scale;
+    return uintBitsToFloat(floatBitsToUint(pos) & mask); // erase bits lower than scale
+}
+
+const int MAX_RAY_STEPS = 512;
+float voxel_size = 1.0;
+
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+void main() 
+{
+    ivec2 index = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(out_img);
+
+    if (index.x < size.x && index.y < size.y) {
+        vec3 ray_pos, ray_dir;
+        get_primary_ray(index, ray_pos, ray_dir);
+        //ray_dir *= voxel_size;
+
+        //imageStore(out_img, index, vec4(ray_dir, 1.0));
+
+        ivec3 world_pos = ivec3(floor(ray_pos / voxel_size));
+        vec3 delta_dist = abs(vec3(length(ray_dir)) / ray_dir);
+        ivec3 ray_step = ivec3(sign(ray_dir * voxel_size));
+
+	    vec3 side_dist = (sign(ray_dir) * (vec3(world_pos) - ray_pos) + (sign(ray_dir) * 0.5) + 0.5) * delta_dist; 
+	
+        bvec3 mask;
+
+        vec4 final_color = vec4(0.0);
+        for (int i = 0; i < MAX_RAY_STEPS; ++i) {
+            mask = lessThanEqual(side_dist.xyz, min(side_dist.yzx, side_dist.zxy));
+			side_dist += vec3(mask) * delta_dist;
+			world_pos += ivec3(vec3(mask)) * ray_step;
+
+            if (world_pos.x >= 0.0 && world_pos.y >= 0 && world_pos.z >= 0 &&
+                world_pos.x < info.size.x && world_pos.y < info.size.y && world_pos.z < info.size.z) {
+
+                //imageStore(out_img, index, vec4(vec3(dot(vec3(mask), vec3(0.5, 0.7, 0.9))), 1.0));
+                //break;
+
+                //final_color += vec4(0.7) * (float(i) / MAX_RAY_STEPS);
+                //final_color += vec4(0.005, 0.005, 0.005, 0.005);
+                final_color = mix(final_color, vec4(0.7), 0.005);
+
+                uint voxel = get_voxel(world_pos);
+                if (voxel > 0) {
+                    //imageStore(out_img, index, vec4(vec3(dot(vec3(mask), vec3(0.5, 0.7, 0.9))), 1.0));
+                    final_color = vec4(vec3(dot(vec3(mask), vec3(0.5, 0.7, 0.9))), 1.0);
+                    break;
+                }
+            }
+        }
+
+        imageStore(out_img, index, final_color);
+    }
+}

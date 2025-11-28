@@ -43,8 +43,8 @@ TEST(TestTreeBuild, Solid) {
         EXPECT_EQ(i.get_nodes().size(), 1 + 64);
         EXPECT_EQ(i.get_voxels().size(), 16 * 16 * 16);
 
-        // a 2 level tree will have the root's leaves starting at 0
-        EXPECT_EQ(i.get_nodes().back().child_offset, 0);
+        // a 2 level tree will have the root's leaves starting at 1
+        EXPECT_EQ(i.get_nodes().front().child_offset, 1);
 
         for (size_t z = 0; z < 16; ++z) {
             for (size_t y = 0; y < 16; ++y) {
@@ -87,8 +87,8 @@ TEST(TestTreeBuild, SolidNumbered) {
         EXPECT_EQ(i.get_nodes().size(), 1 + 64);
         EXPECT_EQ(i.get_voxels().size(), 16 * 16 * 16);
 
-        // a 2 level tree will have the root's leaves starting at 0
-        EXPECT_EQ(i.get_nodes().back().child_offset, 0);
+        // a 2 level tree will have the root's leaves starting at 1
+        EXPECT_EQ(i.get_nodes().front().child_offset, 1);
 
         for (size_t z = 0; z < 16; ++z) {
             for (size_t y = 0; y < 16; ++y) {
@@ -103,6 +103,51 @@ TEST(TestTreeBuild, SolidNumbered) {
 TEST(TestTreeBuild, TestSphere) {
     constexpr size_t kRadius = 10.f;
     constexpr size_t kSize = 64;
+
+    const vox::VDB::coord_t center(kSize / 2);
+
+    auto sampler = [center, kRadius](vox::VDB::coord_t pos) -> uint8_t {
+        int dist = static_cast<int>(glm::distance(glm::vec3(center), glm::vec3(pos)));
+        if (dist > kRadius) {
+            return 0;
+        } else {
+            return dist + 1;
+        }
+    };
+
+    vox::VDB vdb(nullptr);
+    vdb.build_from(vox::VDB::coord_t(kSize), sampler);
+
+    if constexpr (false) {
+        for (size_t z = 0; z < kSize; ++z) {
+            for (size_t y = 0; y < kSize; ++y) {
+                for (size_t x = 0; x < kSize; ++x) {
+                    std::cout << (vdb.get_voxel({x, y, z}) > 0 ? '*' : ' ') << " ";
+                }
+                std::cout << std::endl;
+            }
+            std::cout << std::endl;
+        }
+    }
+
+    for (size_t z = 0; z < kSize; ++z) {
+        for (size_t y = 0; y < kSize; ++y) {
+            for (size_t x = 0; x < kSize; ++x) {
+                auto val = vdb.get_voxel({x, y, z});
+                EXPECT_EQ(val, sampler({x, y, z}));
+
+                if (val > 0) {
+                    EXPECT_LE(static_cast<int>(glm::distance(glm::vec3(center), glm::vec3(x, y, z))),
+                              kRadius);
+                }
+            }
+        }
+    }
+}
+
+TEST(TestTreeBuild, TestSphereLarge) {
+    constexpr size_t kRadius = 105.f;
+    constexpr size_t kSize = 256;
 
     const vox::VDB::coord_t center(kSize / 2);
 

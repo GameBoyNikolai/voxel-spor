@@ -521,7 +521,8 @@ DescriptorUpdater& DescriptorUpdater::with_ssbo(uint32_t binding, Buffer::ptr bu
     return *this;
 }
 
-DescriptorUpdater& DescriptorUpdater::with_sampled_image(uint32_t binding, Texture::ptr texture,
+DescriptorUpdater& DescriptorUpdater::with_sampled_image(uint32_t binding,
+                                                         const helpers::ImageView& image,
                                                          vk::Sampler::ptr sampler,
                                                          std::optional<VkImageLayout> layout) {
     auto& desc_write = add_write(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
@@ -529,7 +530,7 @@ DescriptorUpdater& DescriptorUpdater::with_sampled_image(uint32_t binding, Textu
 
     auto& image_info = image_infos_.emplace_back();
     image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    image_info.imageView = texture->view;
+    image_info.imageView = image.view;
     image_info.sampler = *sampler;
 
     desc_write.pImageInfo = &image_info;
@@ -537,14 +538,15 @@ DescriptorUpdater& DescriptorUpdater::with_sampled_image(uint32_t binding, Textu
     return *this;
 }
 
-DescriptorUpdater& DescriptorUpdater::with_storage_image(uint32_t binding, Texture::ptr texture,
+DescriptorUpdater& DescriptorUpdater::with_storage_image(uint32_t binding,
+                                                         const helpers::ImageView& image,
                                                          std::optional<VkImageLayout> layout) {
     auto& desc_write = add_write(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     desc_write.dstBinding = binding;
 
     auto& image_info = image_infos_.emplace_back();
     image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    image_info.imageView = texture->view;
+    image_info.imageView = image.view;
 
     desc_write.pImageInfo = &image_info;
 

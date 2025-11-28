@@ -7,8 +7,8 @@
 #include "shaders/test.frag.inl"
 #include "shaders/test.vert.inl"
 #include "tiny_obj_loader.h"
-#include "vkh/glm_decl.h"
 #include "viewer/image_loader.h"
+#include "vkh/glm_decl.h"
 
 namespace spor {
 
@@ -60,8 +60,8 @@ void TestScene::setup() {
                        .update();              //
 
     model_desc_ = desc_allocator_->allocate(*graphics_pipeline_->descriptor_layouts[1])
-                      .with_sampled_image(0, model_->texture(), sampler_)  //
-                      .update();                                           //
+                      .with_sampled_image(0, model_->texture()->image_view(), sampler_)  //
+                      .update();                                                         //
 }
 
 vk::Semaphore::ptr TestScene::render(uint32_t framebuffer_index,

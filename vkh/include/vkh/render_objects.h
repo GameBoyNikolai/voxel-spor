@@ -71,10 +71,10 @@ public:
     DescriptorUpdater& with_ssbo(uint32_t binding, Buffer::ptr buffer,
                                  std::optional<size_t> offset = std::nullopt,
                                  std::optional<size_t> size = std::nullopt);
-    DescriptorUpdater& with_sampled_image(uint32_t binding, Texture::ptr texture,
+    DescriptorUpdater& with_sampled_image(uint32_t binding, const helpers::ImageView& image,
                                           vk::Sampler::ptr sampler,
                                           std::optional<VkImageLayout> layout = std::nullopt);
-    DescriptorUpdater& with_storage_image(uint32_t binding, Texture::ptr texture,
+    DescriptorUpdater& with_storage_image(uint32_t binding, const helpers::ImageView& image,
                                           std::optional<VkImageLayout> layout = std::nullopt);
 
     DescriptorSet update();

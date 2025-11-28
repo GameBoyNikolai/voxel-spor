@@ -42,7 +42,7 @@ SVNode generate_tree(std::vector<SVNode>& nodes, std::vector<uint8_t>& voxel_dat
     constexpr size_t kNumChildren = sizeof(decltype(SVNode::child_mask)) * 8;
     constexpr VDB::coord_t kSize(4);
 
-    SVNode node{};
+    SVNode node{0, 0, 0};
 
     if (level == 1) {  // level 0 contains voxels, so level 1 nodes are leaf nodes
         node.is_leaf = true;
@@ -94,17 +94,51 @@ double log_n(double n, double val) { return std::log(val) / std::log(n); }
 VDB::VDB(vk::SurfaceDevice::ptr device) : device_(device) {}
 
 void VDB::build_from(coord_t dims, const std::function<uint8_t(coord_t)>& sampler) {
+    h_nodes_.clear();
+    h_voxels_.clear();
+
     constexpr size_t kNumChildren = sizeof(decltype(SVNode::child_mask)) * 8;
     constexpr coord_t kSize(4);
 
     size_t max_dim = std::max({dims.x, dims.y, dims.z});
     size_t level = std::ceil(log_n(kSize.x, max_dim));
 
+    h_nodes_.emplace_back();
     auto root = generate_tree(h_nodes_, h_voxels_, level, coord_t(0), sampler);
-    h_nodes_.push_back(root);
+    h_nodes_[0] = root;
 
     height_ = level;
     size_ = node_size_at_level(height_, kSize);
+}
+
+void VDB::move_to_device(vk::CommandPool::ptr cmd_pool) {
+    d_info_ = vk::create_storage_buffer(device_, 0, 1, sizeof(VDBInfo));
+    d_nodes_ = vk::create_storage_buffer(device_, 0, h_nodes_.size(), sizeof(SVNode));
+    d_voxels_ = vk::create_storage_buffer(device_, 0, h_voxels_.size(), sizeof(uint8_t));
+
+    {
+        VDBInfo info{size_, static_cast<glm::u32>(height_)};
+
+        auto transfer_buf = vk::create_and_fill_transfer_buffer(
+            device_, reinterpret_cast<unsigned char*>(&info), sizeof(VDBInfo));
+        auto transfer_cmd
+            = vk::buffer_memcpy(device_, cmd_pool, transfer_buf, d_info_, d_info_->size());
+        vk::submit_commands(transfer_cmd, device_->queues.graphics.queue);
+    }
+
+    {
+        auto transfer_buf = vk::create_and_fill_transfer_buffer(device_, h_nodes_);
+        auto transfer_cmd
+            = vk::buffer_memcpy(device_, cmd_pool, transfer_buf, d_nodes_, d_nodes_->size());
+        vk::submit_commands(transfer_cmd, device_->queues.graphics.queue);
+    }
+
+    {
+        auto transfer_buf = vk::create_and_fill_transfer_buffer(device_, h_voxels_);
+        auto transfer_cmd
+            = vk::buffer_memcpy(device_, cmd_pool, transfer_buf, d_voxels_, d_voxels_->size());
+        vk::submit_commands(transfer_cmd, device_->queues.graphics.queue);
+    }
 }
 
 uint8_t VDB::get_voxel(coord_t pos) const {
@@ -119,7 +153,7 @@ uint8_t VDB::get_voxel(coord_t pos) const {
     constexpr size_t kNumChildren = sizeof(decltype(SVNode::child_mask)) * 8;
     constexpr coord_t kSize(4);
 
-    SVNode current = h_nodes_.back();
+    SVNode current = h_nodes_.front();
     size_t current_level = height_;
     coord_t current_min(0);
 
